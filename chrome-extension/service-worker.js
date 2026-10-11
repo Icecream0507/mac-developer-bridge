@@ -1,7 +1,7 @@
 const NATIVE_HOST = "io.github.alexanderradahl.mac_developer_bridge";
 const VERSION = "0.2.20";
 // Immutable identity of the executing release, sent on every native handshake.
-const LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011.2";
+const LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011.3";
 const NATIVE_INSTANCE_ID = crypto.randomUUID();
 const NATIVE_OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_NATIVE_OPERATIONS = 5_000;
@@ -3318,7 +3318,7 @@ function pageSnapshot(maxTextChars, maxElements) {
       observedElements.push(node);
       const shadow = node.shadowRoot;
       if (shadow?.mode === "open" && shadow.host === node) {
-        if (entry.depth >= 16 || roots.length >= 128) openShadowTraversalTruncated = true;
+        if (entry.depth >= 16 || roots.length >= 512) openShadowTraversalTruncated = true;
         else roots.push({ root: shadow, depth: entry.depth + 1 });
       }
     }

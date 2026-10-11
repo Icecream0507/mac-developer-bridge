@@ -500,12 +500,12 @@ await scenario('passive-video-readback-includes-readiness-and-strips-url-secrets
 
 await scenario('snapshot-root-depth-and-node-budgets-stop-with-explicit-truncation', () => {
   const many = fixture();
-  for (let index = 0; index < 140; index++) {
+  for (let index = 0; index < 530; index++) {
     const host = new FakeElement('x-many', { id: 'many-' + index }); many.document.body.append(host);
     host.attach().append(new FakeElement('button', {}, 'bounded'));
   }
   const roots = many.pageSnapshot(20_000, 500);
-  assert.equal(roots.openShadowRoots, 127);
+  assert.equal(roots.openShadowRoots, 511);
   assert.equal(roots.openShadowTraversalTruncated, true);
   const deep = fixture();
   let parent = deep.shadow;
