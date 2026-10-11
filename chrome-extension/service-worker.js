@@ -1,12 +1,40 @@
 const NATIVE_HOST = "io.github.alexanderradahl.mac_developer_bridge";
 const VERSION = "0.2.20";
 // Immutable identity of the executing release, sent on every native handshake.
-const LOADED_EXTENSION_BUILD_ID = "browser-rich-paste-20261008.1";
+const LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011.1";
 const NATIVE_INSTANCE_ID = crypto.randomUUID();
 const NATIVE_OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_NATIVE_OPERATIONS = 5_000;
 const MAX_NATIVE_RETAINED_RESULT_BYTES = 8 * 1024 * 1024;
 const nativeOperations = new Map();
+const ACTIVE_VIDEO_TRANSFER_STORAGE_PREFIX = "macDeveloperBridgeActiveVideoTransfer:";
+const VIDEO_FILE_TRANSFER_TTL_MS = 15 * 60 * 1000;
+const MAX_ACTIVE_VIDEO_FILE_TRANSFERS = 2;
+let extensionReloadReserved = false;
+function videoFileTransferStorageKey(tabId, documentId, transferId) {
+  return ACTIVE_VIDEO_TRANSFER_STORAGE_PREFIX + tabId + ":" + documentId + ":" + transferId;
+}
+async function markActiveVideoFileTransfer(key) {
+  await chrome.storage.session.set({ [key]: Date.now() + VIDEO_FILE_TRANSFER_TTL_MS });
+}
+async function refreshActiveVideoFileTransfer(key) {
+  await chrome.storage.session.set({ [key]: Date.now() + VIDEO_FILE_TRANSFER_TTL_MS });
+}
+async function clearActiveVideoFileTransfer(key) {
+  await chrome.storage.session.remove(key);
+}
+async function countActiveVideoFileTransfers() {
+  const stored = await chrome.storage.session.get(null);
+  const expired = [];
+  let active = 0;
+  for (const [key, expiresAt] of Object.entries(stored || {})) {
+    if (!key.startsWith(ACTIVE_VIDEO_TRANSFER_STORAGE_PREFIX)) continue;
+    if (Number.isSafeInteger(expiresAt) && expiresAt > Date.now()) active++;
+    else expired.push(key);
+  }
+  if (expired.length) await chrome.storage.session.remove(expired);
+  return active;
+}
 let nativeConnectionSequence = 0;
 const WORKSPACE_KEY = "macDeveloperBridgeWorkspace";
 const WORKSPACE_TARGET_KEY = "macDeveloperBridgeWorkspaceTarget";
@@ -3901,6 +3929,298 @@ async function pageSetFileInput(selector, file, options = {}) {
   }
 }
 
+async function pageVideoFileTransfer(phase, selector, transferId, payload, options = {}) {
+  let stage = "resolve";
+  let actionDispatched = false;
+  let fileAssigned = false;
+  let inputEventDispatched = false;
+  let changeEventDispatched = false;
+  let inputDefaultPrevented = false;
+  let changeDefaultPrevented = false;
+  let targetReplaced = false;
+  let fileRetained = false;
+  let fileCount = 0;
+  let receivedBytes = 0;
+  let transfer = null;
+  let transfers = null;
+  let releaseOnExit = phase === "commit" || phase === "abort";
+  const deadline = Number(options.deadlineMs);
+  const storeKey = Symbol.for("io.github.alexanderradahl.mac-developer-bridge.video-file-transfers.v1");
+  const maxFileBytes = 128 * 1024 * 1024;
+  const chunkBytes = 256 * 1024;
+  const transferTtlMs = 15 * 60 * 1000;
+  const fail = (code, message) => { const error = new Error(message); error.code = code; throw error; };
+  const assertDeadline = () => {
+    if (Number.isFinite(deadline) && Date.now() >= deadline) {
+      fail("CHROME_OPERATION_DEADLINE_EXCEEDED", "The video-file operation deadline elapsed; reconcile before retrying.");
+    }
+  };
+  const validTransferId = typeof transferId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(transferId);
+  const metadata = () => ({
+    transferId: validTransferId ? transferId : null,
+    state: phase === "begin" ? "begun" : phase === "chunk" ? "receiving" : phase === "commit" ? "committed" : null,
+    actionDispatched, fileAssigned, inputEventDispatched, changeEventDispatched,
+    inputDefaultPrevented, changeDefaultPrevented, targetReplaced, fileRetained, fileCount,
+    size: Number.isSafeInteger(transfer?.file?.size) ? transfer.file.size
+      : Number.isSafeInteger(payload?.size) ? payload.size : null,
+    fileSha256: typeof transfer?.file?.sha256 === "string" && /^[a-f0-9]{64}$/.test(transfer.file.sha256)
+      ? transfer.file.sha256
+      : typeof payload?.sha256 === "string" && /^[a-f0-9]{64}$/.test(payload.sha256) ? payload.sha256 : null,
+    receivedBytes,
+    outcomeVerified: false,
+  });
+  const clearTransfer = id => {
+    const current = transfers?.get(id);
+    if (!current) return;
+    if (current.expiryTimer) clearTimeout(current.expiryTimer);
+    for (let index = 0; index < current.chunks.length; index++) current.chunks[index] = null;
+    current.chunks.length = 0;
+    current.receivedBytes = 0;
+    current.element = null;
+    transfers.delete(id);
+  };
+  try {
+    assertDeadline();
+    if (!["begin", "chunk", "commit", "abort"].includes(phase)) fail("CHROME_VIDEO_FILE_PHASE_INVALID", "The video-file transfer phase is invalid.");
+    if (!validTransferId || typeof selector !== "string" || !selector.trim() || selector.length > 10000) {
+      fail("CHROME_VIDEO_FILE_TRANSFER_INVALID", "The video-file transfer identity or selector is invalid.");
+    }
+    if (typeof options.expectedDocumentId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(options.expectedDocumentId)
+        || !Number.isSafeInteger(options.tabId) || options.tabId < 0
+        || typeof options.expectedUrl !== "string" || !options.expectedUrl) {
+      fail("CHROME_DOCUMENT_CHANGED", "A fresh observed document identity is required for video-file selection.");
+    }
+    const documentAtCall = document;
+    const rootAtCall = document.documentElement;
+    const urlAtCall = location.href;
+    if (options.expectedUrl !== urlAtCall) fail("CHROME_DOCUMENT_CHANGED", "The approved document URL changed.");
+    const currentStore = globalThis[storeKey];
+    if (currentStore === undefined) {
+      transfers = new Map();
+      Object.defineProperty(globalThis, storeKey, { value: transfers, enumerable: false, configurable: false, writable: false });
+    } else if (currentStore instanceof Map) {
+      transfers = currentStore;
+    } else {
+      fail("CHROME_VIDEO_FILE_STATE_INVALID", "The isolated video-file transfer state is unavailable.");
+    }
+    for (const [id, current] of transfers.entries()) {
+      if (!current || current.expiresAt <= Date.now()) clearTransfer(id);
+    }
+    const resolveMatches = () => {
+      try { return [...document.querySelectorAll(selector)]; }
+      catch { fail("CHROME_ELEMENT_NOT_FOUND", "The observed video-file selector is invalid."); }
+    };
+    const assertTarget = (element, current = null) => {
+      assertDeadline();
+      if (document !== documentAtCall || window.document !== documentAtCall
+          || document.documentElement !== rootAtCall || location.href !== urlAtCall) {
+        fail("CHROME_DOCUMENT_CHANGED", "The original document changed during video-file selection.");
+      }
+      if (current && (current.document !== documentAtCall || current.root !== rootAtCall || current.url !== urlAtCall
+          || current.tabId !== options.tabId || current.expectedDocumentId !== options.expectedDocumentId
+          || current.selector !== selector)) {
+        fail("CHROME_DOCUMENT_CHANGED", "The video-file transfer no longer matches its original tab and document.");
+      }
+      const matches = resolveMatches();
+      if (!matches.length) fail("CHROME_ELEMENT_NOT_FOUND", "No element matches the observed video-file selector.");
+      if (matches.length !== 1) fail("CHROME_FILE_INPUT_AMBIGUOUS", "The video-file target must match exactly one element.");
+      if (matches[0] !== element || !element.isConnected || element.ownerDocument !== documentAtCall) {
+        targetReplaced = true;
+        fail("CHROME_FILE_INPUT_REPLACED", "The original file input was replaced; no replacement target was selected.");
+      }
+      if (!(element instanceof HTMLInputElement) || element.type !== "file") {
+        fail("CHROME_ELEMENT_NOT_FILE_INPUT", "The selected element is not a file input.");
+      }
+      if (element.disabled || element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") {
+        fail("CHROME_ELEMENT_DISABLED", "The video-file input is disabled.");
+      }
+      if (element.webkitdirectory || element.hasAttribute("webkitdirectory") || element.hasAttribute("directory")) {
+        fail("CHROME_FILE_DIRECTORY_UNSUPPORTED", "Directory selection is not supported.");
+      }
+      return element;
+    };
+    const assertAccept = (element, file) => {
+      const tokens = String(element.accept || "").trim().toLowerCase().split(",").map(value => value.trim()).filter(Boolean);
+      if (tokens.length && !tokens.some(token => token === "video/mp4" || token === "video/*" || token === ".mp4")) {
+        fail("CHROME_FILE_ACCEPT_MISMATCH", "The file input does not accept MP4 video.");
+      }
+      if (file.mimeType !== "video/mp4" || !file.name.toLowerCase().endsWith(".mp4")) {
+        fail("CHROME_VIDEO_FILE_PAYLOAD_INVALID", "The reviewed file must be an MP4 video.");
+      }
+    };
+    const assertNoSelection = element => {
+      if (element.files && element.files.length) {
+        fail("CHROME_VIDEO_FILE_INPUT_CHANGED", "The target input already has a selected file; no selection was replaced.");
+      }
+    };
+    const validateFile = file => {
+      const expectedKeys = ["lastModified", "mimeType", "name", "sha256", "size"];
+      if (!file || typeof file !== "object" || Array.isArray(file)
+          || Object.keys(file).sort().join("|") !== expectedKeys.join("|")
+          || typeof file.name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._ -]{0,195}\.mp4$/i.test(file.name)
+          || file.name.length > 200 || file.name.trim() !== file.name
+          || file.mimeType !== "video/mp4"
+          || !Number.isSafeInteger(file.size) || file.size < 1 || file.size > maxFileBytes
+          || !Number.isSafeInteger(file.lastModified) || file.lastModified < 0
+          || typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(file.sha256)) {
+        fail("CHROME_VIDEO_FILE_PAYLOAD_INVALID", "The reviewed MP4 metadata is invalid.");
+      }
+      return { name: file.name, mimeType: file.mimeType, size: file.size, sha256: file.sha256, lastModified: file.lastModified };
+    };
+    if (phase === "begin") {
+      stage = "validate-file";
+      if (transfers.has(transferId)) fail("CHROME_VIDEO_FILE_TRANSFER_EXISTS", "This video-file transfer ID is already active.");
+      if (transfers.size >= 1) fail("CHROME_VIDEO_FILE_TRANSFER_LIMIT", "A video-file transfer is already active in this document.");
+      const file = validateFile(payload);
+      const matches = resolveMatches();
+      if (!matches.length) fail("CHROME_ELEMENT_NOT_FOUND", "No element matches the observed video-file selector.");
+      if (matches.length !== 1) fail("CHROME_FILE_INPUT_AMBIGUOUS", "The video-file target must match exactly one element.");
+      const element = assertTarget(matches[0]);
+      assertAccept(element, file);
+      assertNoSelection(element);
+      transfer = {
+        transferId, selector, tabId: options.tabId, expectedDocumentId: options.expectedDocumentId,
+        document: documentAtCall, root: rootAtCall, url: urlAtCall, element, file,
+        chunks: [], receivedBytes: 0, nextChunkIndex: 0, expiresAt: Date.now() + transferTtlMs,
+        expiryTimer: null,
+      };
+      transfers.set(transferId, transfer);
+      transfer.expiryTimer = setTimeout(() => clearTransfer(transferId), transferTtlMs);
+      stage = "begun";
+      receivedBytes = 0;
+      return metadata();
+    }
+    transfer = transfers.get(transferId);
+    if (!transfer) fail("CHROME_VIDEO_FILE_TRANSFER_NOT_FOUND", "The video-file transfer is no longer available.");
+    receivedBytes = transfer.receivedBytes;
+    assertTarget(transfer.element, transfer);
+    assertAccept(transfer.element, transfer.file);
+    if (phase !== "abort") assertNoSelection(transfer.element);
+    if (phase === "chunk") {
+      stage = "validate-chunk";
+      const expectedKeys = ["base64", "index", "offset"];
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)
+          || Object.keys(payload).sort().join("|") !== expectedKeys.join("|")
+          || !Number.isSafeInteger(payload.index) || payload.index !== transfer.nextChunkIndex
+          || !Number.isSafeInteger(payload.offset) || payload.offset !== transfer.receivedBytes
+          || typeof payload.base64 !== "string" || payload.base64.length < 4
+          || payload.base64.length > 349528 || payload.base64.length % 4 !== 0
+          || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(payload.base64)) {
+        fail("CHROME_VIDEO_FILE_CHUNK_INVALID", "The video-file chunk is malformed or out of order.");
+      }
+      const binary = atob(payload.base64);
+      const expectedLength = Math.min(chunkBytes, transfer.file.size - transfer.receivedBytes);
+      if (!binary.length || binary.length !== expectedLength || transfer.receivedBytes + binary.length > transfer.file.size
+          || btoa(binary) !== payload.base64) {
+        fail("CHROME_VIDEO_FILE_CHUNK_INVALID", "The video-file chunk size or encoding is invalid.");
+      }
+      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+      transfer.chunks.push(bytes);
+      transfer.receivedBytes += bytes.length;
+      transfer.nextChunkIndex++;
+      receivedBytes = transfer.receivedBytes;
+      stage = "chunk-accepted";
+      return { ...metadata(), index: payload.index, nextIndex: transfer.nextChunkIndex };
+    }
+    if (phase === "abort") {
+      releaseOnExit = true;
+      receivedBytes = 0;
+      stage = "aborted";
+      return { ...metadata(), state: "aborted", aborted: true };
+    }
+    if (phase !== "commit") fail("CHROME_VIDEO_FILE_PHASE_INVALID", "The video-file transfer phase is invalid.");
+    releaseOnExit = true;
+    stage = "assemble";
+    if (transfer.receivedBytes !== transfer.file.size
+        || transfer.nextChunkIndex !== Math.ceil(transfer.file.size / chunkBytes)) {
+      fail("CHROME_VIDEO_FILE_INCOMPLETE", "The video-file transfer is incomplete.");
+    }
+    const bytes = new Uint8Array(transfer.file.size);
+    let offset = 0;
+    for (const part of transfer.chunks) {
+      bytes.set(part, offset);
+      offset += part.length;
+    }
+    if (offset !== transfer.file.size) fail("CHROME_VIDEO_FILE_INCOMPLETE", "The assembled video-file size is invalid.");
+    receivedBytes = transfer.receivedBytes;
+    for (let index = 0; index < transfer.chunks.length; index++) transfer.chunks[index] = null;
+    transfer.chunks.length = 0;
+    transfer.receivedBytes = 0;
+    stage = "validate-file";
+    if (bytes.length < 16
+        || bytes[4] !== 0x66 || bytes[5] !== 0x74 || bytes[6] !== 0x79 || bytes[7] !== 0x70) {
+      fail("CHROME_VIDEO_FILE_SIGNATURE_MISMATCH", "The selected bytes do not have an MP4 ftyp box.");
+    }
+    const boxSize = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, false);
+    if (boxSize < 16 || boxSize > bytes.length) {
+      fail("CHROME_VIDEO_FILE_SIGNATURE_MISMATCH", "The MP4 ftyp box length is invalid.");
+    }
+    if (!globalThis.crypto?.subtle) fail("CHROME_VIDEO_FILE_HASH_UNAVAILABLE", "The document cannot verify the reviewed MP4 digest.");
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    if ([...digest].map(value => value.toString(16).padStart(2, "0")).join("") !== transfer.file.sha256) {
+      fail("CHROME_VIDEO_FILE_HASH_MISMATCH", "The video bytes do not match the reviewed SHA-256 digest.");
+    }
+    assertDeadline();
+    assertTarget(transfer.element, transfer);
+    assertAccept(transfer.element, transfer.file);
+    assertNoSelection(transfer.element);
+    if (typeof File !== "function" || typeof DataTransfer !== "function") {
+      fail("CHROME_VIDEO_FILE_PAYLOAD_INVALID", "The document does not support ordinary MP4 file selection.");
+    }
+    const selectedFile = new File([bytes], transfer.file.name, { type: transfer.file.mimeType, lastModified: transfer.file.lastModified });
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(selectedFile);
+    assertDeadline();
+    assertTarget(transfer.element, transfer);
+    assertAccept(transfer.element, transfer.file);
+    assertNoSelection(transfer.element);
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files")?.set;
+    if (typeof setter !== "function") fail("CHROME_VIDEO_FILE_PAYLOAD_INVALID", "The native file-input setter is unavailable.");
+    stage = "assign-files";
+    actionDispatched = true;
+    setter.call(transfer.element, dataTransfer.files);
+    fileAssigned = true;
+    const assignedSelection = transfer.element.files?.[0] || null;
+    const selectionMatches = () => transfer.element.files?.length === 1 && transfer.element.files[0] === assignedSelection
+      && Boolean(assignedSelection) && assignedSelection.name === transfer.file.name
+      && assignedSelection.size === transfer.file.size && assignedSelection.type === transfer.file.mimeType
+      && assignedSelection.lastModified === transfer.file.lastModified;
+    fileCount = transfer.element.files?.length || 0;
+    fileRetained = selectionMatches();
+    if (!fileRetained) fail("CHROME_VIDEO_FILE_SELECTION_CHANGED", "The original input did not retain the reviewed MP4 selection.");
+    stage = "input-event";
+    const input = new Event("input", { bubbles: true, composed: true, cancelable: false });
+    inputEventDispatched = true;
+    transfer.element.dispatchEvent(input);
+    inputDefaultPrevented = input.defaultPrevented;
+    stage = "change-event";
+    const change = new Event("change", { bubbles: true, cancelable: false });
+    changeEventDispatched = true;
+    transfer.element.dispatchEvent(change);
+    changeDefaultPrevented = change.defaultPrevented;
+    await Promise.resolve();
+    stage = "readback";
+    assertTarget(transfer.element, transfer);
+    fileCount = transfer.element.files?.length || 0;
+    fileRetained = selectionMatches();
+    return {
+      ...metadata(),
+      state: "committed",
+      file: { name: transfer.file.name, mimeType: transfer.file.mimeType, size: transfer.file.size, sha256: transfer.file.sha256 },
+      trusted: false,
+      applicationAccepted: null,
+    };
+  } catch (error) {
+    if (transfer && ["begin", "chunk", "commit", "abort"].includes(phase)) releaseOnExit = true;
+    const details = metadata();
+    error.details = { ...(error.details || {}), ...details };
+    if (!options.errorsAsData) throw error;
+    return { __mdbPageActionError: { code: error.code || "CHROME_VIDEO_FILE_TRANSFER_FAILED", ...details } };
+  } finally {
+    if (releaseOnExit && transfer) clearTransfer(transferId);
+  }
+}
+
 async function pageClick(selector, options = {}) {
   let actionDispatched = false;
   let clickDispatched = false;
@@ -5144,8 +5464,36 @@ async function dispatch(message) {
     return { version: VERSION, extensionId: chrome.runtime.id, connected: true };
   }
   if (message.method === "extension.reload") {
-    // Internal maintenance hook for this unpacked extension. Respond first so the
-    // native host/client sees success, then let Chrome restart the service worker.
+    // Refuse to tear down the extension while another native action or a
+    // multi-call video upload is active. Reserve first so no new action enters
+    // during the response/reload window.
+    if (extensionReloadReserved) {
+      const error = new Error("The extension is already preparing to reload.");
+      error.code = "CHROME_EXTENSION_RELOAD_PENDING";
+      throw error;
+    }
+    const activeOperationCount = [...nativeOperations.values()]
+      .filter(operation => operation.id !== message.id && operation.state === "dispatched").length;
+    if (activeOperationCount) {
+      const error = new Error("The extension cannot reload while browser operations are active.");
+      error.code = "CHROME_EXTENSION_BUSY";
+      error.details = { activeOperationCount };
+      throw error;
+    }
+    extensionReloadReserved = true;
+    try {
+      const activeVideoTransferCount = await countActiveVideoFileTransfers();
+      if (activeVideoTransferCount) {
+        const error = new Error("The extension cannot reload while a video-file transfer is active.");
+        error.code = "CHROME_EXTENSION_BUSY";
+        error.details = { activeVideoTransferCount };
+        throw error;
+      }
+    } catch (error) {
+      extensionReloadReserved = false;
+      throw error;
+    }
+    // Respond first so the native host/client sees success, then restart Chrome.
     setTimeout(() => chrome.runtime.reload(), 100);
     return { reloading: true, version: VERSION, extensionId: chrome.runtime.id };
   }
@@ -5543,6 +5891,61 @@ async function dispatch(message) {
       ], "MAIN", { deadlineMs: message.deadlineMs, includeDocumentIdentity: true, expectedDocumentId: args.expectedDocumentId }), message.deadlineMs);
     }
 
+    case "tabs.videoFileBegin":
+    case "tabs.videoFileChunk":
+    case "tabs.videoFileCommit":
+    case "tabs.videoFileAbort": {
+      const tab = await getApprovedTab(args.tabId, compiled);
+      if (typeof args.expectedDocumentId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(args.expectedDocumentId)
+          || typeof args.transferId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(args.transferId)) {
+        const error = new Error("A fresh observed document and transfer identity are required for MP4 file selection.");
+        error.code = "CHROME_DOCUMENT_CHANGED";
+        error.details = { stage: "before-injection", actionDispatched: false };
+        throw error;
+      }
+      const phases = {
+        "tabs.videoFileBegin": "begin",
+        "tabs.videoFileChunk": "chunk",
+        "tabs.videoFileCommit": "commit",
+        "tabs.videoFileAbort": "abort",
+      };
+      const phase = phases[message.method];
+      const payload = phase === "begin" ? args.file
+        : phase === "chunk" ? { index: args.index, offset: args.offset, base64: args.base64 } : null;
+      const storageKey = videoFileTransferStorageKey(tab.id, args.expectedDocumentId, args.transferId);
+      if (phase === "begin") {
+        const activeVideoTransferCount = await countActiveVideoFileTransfers();
+        if (activeVideoTransferCount >= MAX_ACTIVE_VIDEO_FILE_TRANSFERS) {
+          const error = new Error("The extension already has the maximum number of active video-file transfers.");
+          error.code = "CHROME_VIDEO_FILE_TRANSFER_LIMIT";
+          error.details = { activeVideoTransferCount };
+          throw error;
+        }
+        await markActiveVideoFileTransfer(storageKey);
+      }
+      const operation = () => executeInTab(tab.id, pageVideoFileTransfer, [
+        phase, String(args.selector || ""), args.transferId, payload, {
+          tabId: tab.id, expectedDocumentId: args.expectedDocumentId, expectedUrl: tab.url,
+          deadlineMs: message.deadlineMs, errorsAsData: true,
+        },
+      ], "ISOLATED", {
+        deadlineMs: message.deadlineMs, includeDocumentIdentity: true, expectedDocumentId: args.expectedDocumentId,
+      });
+      try {
+        const result = phase === "commit"
+          ? await observeTabAction(tab.id, operation, message.deadlineMs)
+          : await operation();
+        if (phase === "begin" || phase === "chunk") await refreshActiveVideoFileTransfer(storageKey);
+        if (phase === "commit" || phase === "abort") await clearActiveVideoFileTransfer(storageKey);
+        return result;
+      } catch (error) {
+        // A page-action response means the isolated transfer function ran and
+        // released its state on error. Transport/script-result errors stay
+        // marked as uncertain so reload cannot interrupt an unknown outcome.
+        if (Number.isInteger(error?.details?.frameId)) await clearActiveVideoFileTransfer(storageKey);
+        throw error;
+      }
+    }
     case "tabs.fill": {
       const tab = await getApprovedTab(args.tabId, compiled);
       return await observeTabAction(tab.id, () => executeInTab(tab.id, pageFill, [String(args.selector || ""), String(args.value ?? ""), Boolean(args.submit), {
@@ -5689,6 +6092,11 @@ async function connect() {
         reply({ type: "response", id: message.id, ok: false,
           error: { code: "CHROME_OPERATION_RECONCILIATION_REQUIRED", message: "The original operation is still running." } });
       }
+      return;
+    }
+    if (extensionReloadReserved) {
+      reply({ type: "response", id: message.id, ok: false,
+        error: { code: "CHROME_EXTENSION_RELOAD_PENDING", message: "The extension is preparing to reload; no new browser action was dispatched." } });
       return;
     }
     const readOnly = nativeOperationReadOnly(message.method);

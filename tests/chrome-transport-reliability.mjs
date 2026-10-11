@@ -431,7 +431,7 @@ try {
     'const NATIVE_HOST = "fixture"; const VERSION = "fixture"; const LOADED_EXTENSION_BUILD_ID = "fixture-build";'
     + 'const NATIVE_INSTANCE_ID = crypto.randomUUID(); const NATIVE_OPERATION_RETENTION_MS = 86400000;'
     + 'const MAX_NATIVE_OPERATIONS = 5000; const MAX_NATIVE_RETAINED_RESULT_BYTES = 8388608;'
-    + 'const nativeOperations = new Map(); let nativeConnectionSequence = 0; let port = null; let reconnectTimer = null;\n'
+    + 'const nativeOperations = new Map(); let nativeConnectionSequence = 0; let port = null; let reconnectTimer = null; let extensionReloadReserved = false;\n'
     + nativeSection, context);
   await eventually(() => ports.length === 1 && ports[0].messages.some((m) => m.type === "ready"));
   const firstPort = ports[0];

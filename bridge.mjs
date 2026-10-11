@@ -13,6 +13,10 @@ import { createFederation, consumePersonalApproval } from "./lib/federation.mjs"
 import { backgroundChromeCall, backgroundChromeStatus, backgroundChromeOperationStatus, safeChromeDiagnostics } from "./lib/chrome-extension-client.mjs";
 
 import { prepareChromeImageFile } from "./lib/chrome-image-file.mjs";
+import { prepareChromeVideoFile, MAX_CHROME_VIDEO_FILE_BYTES } from "./lib/chrome-video-file.mjs";
+import { transferChromeVideoFile } from "./lib/chrome-video-upload.mjs";
+
+const chromeVideoUploadsInFlight = new Set();
 
 const BRIDGE_VERSION = "0.3.10";
 const SERVER_NAME = "mac-developer-bridge";
@@ -490,6 +494,24 @@ function auditSafeArguments(tool, args) {
       expected_text: "[REDACTED_EXISTING_EDITOR_TEXT]",
     };
   }
+  if (tool === "chrome_set_video_input") {
+    // Redact in every audit mode, including internal chunk calls. Never spread
+    // args: file names, local paths and base64/raw bytes must remain private.
+    const mimeType = args?.mime_type ?? args?.file?.mimeType;
+    const digest = args?.expected_sha256 ?? args?.file?.sha256;
+    return {
+      tab_id: args?.tab_id ?? args?.tabId,
+      selector: args?.selector,
+      expected_document_id: args?.expected_document_id ?? args?.expectedDocumentId,
+      mime_type: mimeType === "video/mp4" ? mimeType : null,
+      expected_sha256: typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest) ? digest : null,
+      video_size: Number.isSafeInteger(args?.file?.size) && args.file.size <= MAX_CHROME_VIDEO_FILE_BYTES ? args.file.size : null,
+      chunk_index: Number.isSafeInteger(args?.index) ? args.index : null,
+      operation_id: args?.operation_id,
+      local_path: "[REDACTED_LOCAL_VIDEO_PATH]",
+      file_bytes: "[REDACTED_VIDEO_BYTES]",
+    };
+  }
   if (tool === "chrome_set_file_input") {
     // Neither a private local path nor image bytes belong in any audit mode.
     const mimeType = args?.mime_type ?? args?.file?.mimeType;
@@ -778,6 +800,21 @@ const TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
+    name: "chrome_reload_extension",
+    title: "Reload the installed MDB Chrome extension after an update",
+    description: "Maintenance operation: reload the installed MDB background extension only when its running build matches expected_build_id. Does not install code, change grants, switch profiles, activate Chrome or submit a website form. The updated extension refuses reload while native operations or staged uploads are active. Older installed builds may not provide that guard; use a quiet maintenance window. Verify the new build with bridge_status after reconnect.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        expected_build_id: { type: "string", minLength: 1, maxLength: 128 },
+        operation_id: { type: "string", minLength: 8, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$" },
+      },
+      required: ["expected_build_id", "operation_id"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  },
+  {
     name: "chrome_workspace_status",
     title: "MDB Chrome workspace status",
     description: "Inspect the extension-owned MDB Chrome tab group and reusable background-tab pool. This is local extension state only and does not access authenticated websites, so it does not consume a personal-browser URL grant.",
@@ -1035,6 +1072,26 @@ const TOOLS = [
         operation_id: { type: "string", minLength: 8, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$", description: "Stable ID for this exact paste. Reconcile uncertainty before another action." },
       },
       required: ["tab_id", "selector", "expected_document_id", "html", "plain_text", "expected_text", "mode", "operation_id"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  },
+  {
+    name: "chrome_set_video_input",
+    title: "Select one reviewed MP4 in a Chrome video file input",
+    description: "Transfer one explicit reviewed local MP4 of at most 128 MiB to an exact observed file input in the expected Chrome document, using bounded 256 KiB chunks. The absolute regular non-symlink file must match its supplied SHA-256. Preserves URL grants and profile checks. Assigns once and emits one synthetic input/change pair without a picker, focus, click or submission. Selection may start the website's own upload. Read the resulting page and reconcile operation_id before further action; selection does not prove saved application acceptance.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tab_id: { type: "integer", minimum: 0 },
+        selector: { type: "string", minLength: 1, maxLength: 10000 },
+        expected_document_id: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$", description: "Exact documentId from a fresh chrome_snapshot. A replacement document is never targeted." },
+        local_path: { type: "string", minLength: 1, maxLength: 4096, description: "Absolute normalized path to one reviewed regular non-symlink MP4. No URLs, directories or discovery." },
+        mime_type: { type: "string", enum: ["video/mp4"] },
+        expected_sha256: { type: "string", pattern: "^[a-f0-9]{64}$", description: "SHA-256 of the reviewed exact MP4 bytes." },
+        operation_id: { type: "string", minLength: 8, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$", description: "Stable ID for this exact video selection. Never automatically replay an uncertain upload." },
+      },
+      required: ["tab_id", "selector", "expected_document_id", "local_path", "mime_type", "expected_sha256", "operation_id"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -2398,7 +2455,7 @@ function chatgptRunStatus(run) {
   };
 }
 
-async function callBackgroundChromeLocal(toolName, method, args = {}) {
+async function callBackgroundChromeLocal(toolName, method, args = {}, { operationId } = {}) {
   try {
     const connection = await backgroundChromeStatus({ dataDir: APP_SUPPORT_DIR, timeoutMs: 1_000 });
     if (!connection?.extensionReady) {
@@ -2406,7 +2463,7 @@ async function callBackgroundChromeLocal(toolName, method, args = {}) {
       error.code = connection?.profileError?.code || connection?.error?.code || "CHROME_EXTENSION_OFFLINE";
       throw error;
     }
-    const result = await backgroundChromeCall(method, args, [], { dataDir: APP_SUPPORT_DIR });
+    const result = await backgroundChromeCall(method, args, [], { dataDir: APP_SUPPORT_DIR, ...(operationId ? { operationId } : {}) });
     await audit(toolName, args, {
       ok: true,
       backgroundChrome: true,
@@ -3640,6 +3697,24 @@ async function dispatchTool(name, args) {
       return status;
     }
 
+    case "chrome_reload_extension": {
+      const expectedBuildId = requireString(args, "expected_build_id");
+      if (expectedBuildId.length > 128) throw new Error("'expected_build_id' must be at most 128 characters");
+      const operationId = chromeOperationId(args, { required: true });
+      if (chromeVideoUploadsInFlight.size > 0) {
+        const error = new Error("Finish or reconcile active video transfers before reloading the extension.");
+        error.code = "CHROME_EXTENSION_BUSY";
+        throw error;
+      }
+      const connection = await backgroundChromeStatus({ dataDir: APP_SUPPORT_DIR, timeoutMs: 1_000 });
+      if (!connection.extensionReady || connection.extension?.buildId !== expectedBuildId) {
+        const error = new Error("The connected extension build does not match the reviewed maintenance target.");
+        error.code = "CHROME_EXTENSION_BUILD_MISMATCH";
+        throw error;
+      }
+      return await callBackgroundChromeLocal(name, "extension.reload", {}, { operationId });
+    }
+
     case "chrome_workspace_status": {
       return await callBackgroundChromeLocal(name, "workspace.status", {});
     }
@@ -3879,6 +3954,36 @@ async function dispatchTool(name, args) {
       return await callBackgroundChrome(name, "tabs.pasteContent", {
         tabId, selector, expectedDocumentId, content: { html, plainText, expectedText, mode },
       }, { operationId });
+    }
+
+    case "chrome_set_video_input": {
+      const tabId = requireInteger(args, "tab_id", 0, 2_147_483_647);
+      const selector = requireString(args, "selector");
+      const expectedDocumentId = requireString(args, "expected_document_id");
+      if (selector.length > 10_000) throw new Error("'selector' must be at most 10000 characters");
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(expectedDocumentId)) throw new Error("'expected_document_id' must identify the observed document");
+      const operationId = chromeOperationId(args, { required: true });
+      if (chromeVideoUploadsInFlight.has(operationId) || chromeVideoUploadsInFlight.size >= 2) {
+        const error = new Error("A video upload is already active with this ID or both bounded upload slots are in use.");
+        error.code = "CHROME_VIDEO_TRANSFER_BUSY";
+        throw error;
+      }
+      chromeVideoUploadsInFlight.add(operationId);
+      let file;
+      try {
+        file = await prepareChromeVideoFile({
+          localPath: requireString(args, "local_path"),
+          expectedSha256: requireString(args, "expected_sha256"),
+          mimeType: requireString(args, "mime_type"),
+        });
+        return await transferChromeVideoFile({
+          file, tabId, selector, expectedDocumentId, operationId,
+          call: (method, input, options) => callBackgroundChrome(name, method, input, options),
+        });
+      } finally {
+        if (file) file.bytes = null;
+        chromeVideoUploadsInFlight.delete(operationId);
+      }
     }
 
     case "chrome_set_file_input": {
