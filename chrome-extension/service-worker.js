@@ -1,7 +1,7 @@
 const NATIVE_HOST = "io.github.alexanderradahl.mac_developer_bridge";
 const VERSION = "0.2.20";
 // Immutable identity of the executing release, sent on every native handshake.
-const LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011.1";
+const LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011.2";
 const NATIVE_INSTANCE_ID = crypto.randomUUID();
 const NATIVE_OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_NATIVE_OPERATIONS = 5_000;
@@ -11,11 +11,32 @@ const ACTIVE_VIDEO_TRANSFER_STORAGE_PREFIX = "macDeveloperBridgeActiveVideoTrans
 const VIDEO_FILE_TRANSFER_TTL_MS = 15 * 60 * 1000;
 const MAX_ACTIVE_VIDEO_FILE_TRANSFERS = 2;
 let extensionReloadReserved = false;
+let videoFileAdmissionQueue = Promise.resolve();
 function videoFileTransferStorageKey(tabId, documentId, transferId) {
   return ACTIVE_VIDEO_TRANSFER_STORAGE_PREFIX + tabId + ":" + documentId + ":" + transferId;
 }
 async function markActiveVideoFileTransfer(key) {
   await chrome.storage.session.set({ [key]: Date.now() + VIDEO_FILE_TRANSFER_TTL_MS });
+}
+function admitActiveVideoFileTransfer(key) {
+  // Only admission is serialized; chunk acknowledgements never wait on this.
+  const admission = videoFileAdmissionQueue.then(async () => {
+    if (extensionReloadReserved) {
+      const error = new Error("The extension is preparing to reload.");
+      error.code = "CHROME_EXTENSION_RELOAD_PENDING";
+      throw error;
+    }
+    const activeVideoTransferCount = await countActiveVideoFileTransfers();
+    if (activeVideoTransferCount >= MAX_ACTIVE_VIDEO_FILE_TRANSFERS) {
+      const error = new Error("The extension already has the maximum number of active video-file transfers.");
+      error.code = "CHROME_VIDEO_FILE_TRANSFER_LIMIT";
+      error.details = { activeVideoTransferCount };
+      throw error;
+    }
+    await markActiveVideoFileTransfer(key);
+  });
+  videoFileAdmissionQueue = admission.catch(() => {});
+  return admission;
 }
 async function refreshActiveVideoFileTransfer(key) {
   await chrome.storage.session.set({ [key]: Date.now() + VIDEO_FILE_TRANSFER_TTL_MS });
@@ -3284,41 +3305,104 @@ async function pageChatgptConversationStart(input) {
 }
 
 function pageSnapshot(maxTextChars, maxElements) {
-  function selectorFor(element) {
-    if (!(element instanceof Element)) return null;
+  // Walk only open roots, without touching frames, closed roots, focus or media.
+  const roots = [{ root: document, depth: 0 }];
+  const observedElements = [];
+  let openShadowTraversalTruncated = false;
+  for (let index = 0; index < roots.length; index++) {
+    const entry = roots[index];
+    const walker = document.createTreeWalker(entry.root, 1);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (observedElements.length >= 20000) { openShadowTraversalTruncated = true; break; }
+      observedElements.push(node);
+      const shadow = node.shadowRoot;
+      if (shadow?.mode === "open" && shadow.host === node) {
+        if (entry.depth >= 16 || roots.length >= 128) openShadowTraversalTruncated = true;
+        else roots.push({ root: shadow, depth: entry.depth + 1 });
+      }
+    }
+    if (observedElements.length >= 20000) break;
+  }
+  function deepActiveElement() {
+    let active = document.activeElement;
+    for (let depth = 0; depth < 16; depth++) {
+      const shadow = active?.shadowRoot;
+      if (!shadow || shadow.mode !== "open" || shadow.host !== active || !shadow.activeElement) break;
+      active = shadow.activeElement;
+    }
+    return active;
+  }
+  function selectorFor(element, shadowDepth = 0) {
+    if (!(element instanceof Element) || shadowDepth > 16) return null;
+    const root = element.getRootNode?.() || document;
+    const isShadow = root !== document;
+    if (isShadow && (root.mode !== "open" || !root.host || root.host.shadowRoot !== root)) return null;
     const unique = (candidate) => {
-      try { return document.querySelectorAll(candidate).length === 1; } catch { return false; }
+      try { const matches = root.querySelectorAll(candidate); return matches.length === 1 && matches[0] === element; }
+      catch { return false; }
     };
+    let local = null;
     if (element.id) {
-      const candidate = `#${CSS.escape(element.id)}`;
-      if (unique(candidate)) return candidate;
+      const candidate = '#' + CSS.escape(element.id);
+      if (unique(candidate)) local = candidate;
     }
     const attrs = ["data-testid", "data-test", "data-qa", "name", "aria-label"];
     for (const attr of attrs) {
+      if (local) break;
       const value = element.getAttribute(attr);
       if (!value) continue;
-      const candidate = `${element.tagName.toLowerCase()}[${attr}=${JSON.stringify(value)}]`;
-      if (unique(candidate)) return candidate;
+      const candidate = element.tagName.toLowerCase() + '[' + attr + '=' + JSON.stringify(value) + ']';
+      if (unique(candidate)) local = candidate;
     }
-    const parts = [];
-    let current = element;
-    for (let depth = 0; current && current.nodeType === 1 && depth < 32; depth += 1) {
-      let part = current.tagName.toLowerCase();
-      const parent = current.parentElement;
-      if (parent) {
-        const siblings = [...parent.children].filter((child) => child.tagName === current.tagName);
-        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+    if (!local) {
+      const parts = [];
+      let current = element;
+      for (let depth = 0; current && current.nodeType === 1 && depth < 32; depth++) {
+        let segment = current.tagName.toLowerCase();
+        const parent = current.parentElement;
+        const siblings = [...(parent?.children || (isShadow ? root.children : []))]
+          .filter(child => child.tagName === current.tagName);
+        if (siblings.length > 1) segment += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
+        parts.unshift(segment);
+        if (current === document.documentElement) break;
+        current = parent;
       }
-      parts.unshift(part);
-      if (current === document.documentElement) break;
-      current = parent;
+      local = parts.join(" > ") || null;
+      if (isShadow && (!local || !unique(local))) return null;
     }
-    // A root-anchored nth-of-type path is deterministic without running a
-    // full-document query for every visible interactive element. This keeps
-    // snapshots bounded on pages with very large navigation DOMs.
-    return parts.join(" > ") || null;
+    if (!isShadow) return local;
+    const hostSelector = selectorFor(root.host, shadowDepth + 1);
+    const result = hostSelector && local ? hostSelector + " >>> " + local : null;
+    return result && result.length <= 10000 ? result : null;
   }
-
+  function parentAcrossOpenRoot(element) {
+    if (element.parentElement) return element.parentElement;
+    const root = element.getRootNode?.();
+    return root?.mode === "open" && root.host?.shadowRoot === root ? root.host : null;
+  }
+  function uploadLimits(element) {
+    const limits = [];
+    for (let depth = 0, current = element; current && depth < 16; depth++, current = parentAcrossOpenRoot(current)) {
+      const maxSize = current.getAttribute("data-max-size");
+      const maxFileSize = current.getAttribute("data-max-file-size");
+      if (maxSize !== null || maxFileSize !== null) limits.push({
+        selector: selectorFor(current), tag: current.tagName.toLowerCase(),
+        dataMaxSize: maxSize?.slice(0, 100) ?? null,
+        dataMaxFileSize: maxFileSize?.slice(0, 100) ?? null,
+      });
+    }
+    return limits;
+  }
+  function mediaUrlWithoutQuery(value) {
+    if (typeof value !== "string" || !value || value.length > 4096) return null;
+    try {
+      const url = new URL(value, location.href);
+      if (!["https:", "http:", "blob:"].includes(url.protocol) || url.username || url.password) return null;
+      url.search = ""; url.hash = "";
+      return url.href;
+    } catch { return null; }
+  }
 
   let editableRootCount = 0, editableTextBudget = 64000, editableNodeBudget = 200;
   function editableDetails(element) {
@@ -3363,10 +3447,24 @@ function pageSnapshot(maxTextChars, maxElements) {
     };
   }
 
-  const bodyText = (document.body?.innerText || "").slice(0, maxTextChars);
-  const candidates = [...document.querySelectorAll(
+  const textParts = [document.body?.innerText || ""];
+  let textLength = textParts[0].length;
+  for (const { root } of roots.slice(1)) {
+    if (textLength >= maxTextChars) break;
+    for (const child of root.children) {
+      const box = child.getBoundingClientRect(), style = getComputedStyle(child);
+      if (box.width <= 0 || box.height <= 0 || style.visibility === "hidden"
+          || style.display === "none" || style.opacity === "0") continue;
+      const text = String(child.innerText || "").trim();
+      if (text) { textParts.push(text); textLength += text.length + 1; }
+      if (textLength >= maxTextChars) break;
+    }
+  }
+  const combinedText = textParts.join("\n");
+  const bodyText = combinedText.slice(0, maxTextChars);
+  const candidates = observedElements.filter(element => element.matches(
     'a[href],button,input,textarea,select,[draggable="true"],[contenteditable]:not([contenteditable="false"]),summary,[role=button],[role=link],[role=textbox],[role=searchbox],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=combobox],[role=listbox],[role=menu],[role=menuitem],[role=menuitemradio],[role=menuitemcheckbox],[role=option],[role=slider],[role=spinbutton],[role=treeitem],[tabindex]:not([tabindex="-1"])',
-  )];
+  ));
   const elements = [];
   for (const element of candidates) {
     if (elements.length >= maxElements) break;
@@ -3401,7 +3499,7 @@ function pageSnapshot(maxTextChars, maxElements) {
       href: element instanceof HTMLAnchorElement ? element.href : null,
       disabled: Boolean(element.disabled) || element.matches(":disabled") || element.getAttribute("aria-disabled") === "true",
       draggable: element instanceof HTMLElement && element.draggable === true,
-      focused: element === document.activeElement,
+      focused: element === deepActiveElement(),
       readOnly: Boolean(element.readOnly) || element.getAttribute("aria-readonly") === "true",
       inputMode: element.getAttribute("inputmode"),
       min: element.getAttribute("min"),
@@ -3423,7 +3521,7 @@ function pageSnapshot(maxTextChars, maxElements) {
       associatedErrors: [...new Set(
         [element.getAttribute("aria-errormessage"), element.getAttribute("aria-describedby")]
           .filter(Boolean).join(" ").split(/\s+/).filter(Boolean),
-      )].map((id) => document.getElementById(id)).filter((node) => {
+      )].map((id) => (element.getRootNode?.() || document).getElementById?.(id)).filter((node) => {
         if (!node) return false;
         const box = node.getBoundingClientRect();
         const css = getComputedStyle(node);
@@ -3443,7 +3541,7 @@ function pageSnapshot(maxTextChars, maxElements) {
       ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
   };
   const fileLimit = Math.min(32, maxElements);
-  const fileCandidates = [...document.querySelectorAll('input[type="file"]')];
+  const fileCandidates = observedElements.filter(element => element.matches('input[type="file"]'));
   const fileInputs = fileCandidates.slice(0, fileLimit).map(element => ({
     selector: selectorFor(element),
     tag: "input",
@@ -3455,6 +3553,15 @@ function pageSnapshot(maxTextChars, maxElements) {
     directory: element.webkitdirectory || element.hasAttribute("webkitdirectory") || element.hasAttribute("directory"),
     disabled: element.disabled || element.matches(":disabled") || element.getAttribute("aria-disabled") === "true",
     visible: Boolean(visibleBox(element)),
+    hasValue: Boolean(element.value),
+    fileCount: element.files?.length || 0,
+    selectedFiles: [...(element.files || [])].slice(0, 8).map(file => ({
+      name: String(file.name || "").split(/[\\/]/).pop().slice(0, 500),
+      mimeType: String(file.type || "").slice(0, 200),
+      size: Number.isSafeInteger(file.size) && file.size >= 0 ? file.size : null,
+    })),
+    selectedFilesTruncated: (element.files?.length || 0) > 8,
+    uploadLimits: uploadLimits(element),
     labels: [...(element.labels || [])].slice(0, 8).map(label => ({
       selector: selectorFor(label),
       text: String(label.innerText || label.textContent || "").trim().slice(0, 500),
@@ -3462,17 +3569,18 @@ function pageSnapshot(maxTextChars, maxElements) {
     })),
   }));
   const imageLimit = Math.min(100, maxElements);
-  const imageCandidates = [...document.querySelectorAll("img")].filter(element => visibleBox(element));
+  const imageCandidates = observedElements.filter(element => element.tagName === "IMG" && visibleBox(element));
   const images = imageCandidates.slice(0, imageLimit).map(element => {
     const value = element.currentSrc || element.src || "";
     const sourceKind = value.startsWith("data:") ? "data" : value.startsWith("blob:") ? "blob" : /^https?:/.test(value) ? "url" : "other";
     // A data: source contains image bytes; only URL metadata crosses snapshots.
-    const currentSrc = ["url", "blob"].includes(sourceKind) && value.length <= 4096 ? value : null;
+    const currentSrc = ["url", "blob"].includes(sourceKind) ? mediaUrlWithoutQuery(value) : null;
     return {
       selector: selectorFor(element),
       tag: "img",
       alt: element.alt.slice(0, 1000),
       currentSrc,
+      currentSrcWithoutQuery: currentSrc,
       sourceKind,
       sourceTruncated: value.length > 4096,
       naturalWidth: element.naturalWidth,
@@ -3482,23 +3590,51 @@ function pageSnapshot(maxTextChars, maxElements) {
       complete: element.complete,
     };
   });
+  const videoLimit = Math.min(32, maxElements);
+  const videoCandidates = observedElements.filter(element => element.tagName === "VIDEO");
+  const videos = videoCandidates.slice(0, videoLimit).map(element => {
+    const source = String(element.currentSrc || element.src || "");
+    return {
+      selector: selectorFor(element), tag: "video", visible: Boolean(visibleBox(element)),
+      currentSrcWithoutQuery: mediaUrlWithoutQuery(source),
+      sourceKind: source.startsWith("data:") ? "data" : source.startsWith("blob:") ? "blob"
+        : /^https?:/.test(source) ? "url" : source ? "other" : "none",
+      sources: [...element.querySelectorAll("source")].slice(0, 8).map(node => ({
+        srcWithoutQuery: mediaUrlWithoutQuery(node.src), mimeType: String(node.type || "").slice(0, 200),
+      })),
+      duration: Number.isFinite(element.duration) ? element.duration : null,
+      currentTime: Number.isFinite(element.currentTime) ? element.currentTime : null,
+      readyState: element.readyState, networkState: element.networkState,
+      paused: element.paused, ended: element.ended, muted: element.muted, controls: element.controls,
+      videoWidth: element.videoWidth, videoHeight: element.videoHeight,
+      renderedWidth: element.getBoundingClientRect().width,
+      renderedHeight: element.getBoundingClientRect().height,
+      error: element.error ? { code: element.error.code } : null,
+    };
+  });
+  const activeElement = deepActiveElement();
   return {
     title: document.title,
     url: location.href,
     bodyText,
-    bodyTextTruncated: (document.body?.innerText || "").length > maxTextChars,
-    focusedElement: document.activeElement instanceof Element ? {
-      selector: selectorFor(document.activeElement),
-      tag: document.activeElement.tagName.toLowerCase(),
-      role: document.activeElement.getAttribute("role"),
-      ariaLabel: document.activeElement.getAttribute("aria-label"),
+    bodyTextTruncated: combinedText.length > maxTextChars || openShadowTraversalTruncated
+      || (textLength >= maxTextChars && roots.length > 1),
+    focusedElement: activeElement instanceof Element ? {
+      selector: selectorFor(activeElement),
+      tag: activeElement.tagName.toLowerCase(),
+      role: activeElement.getAttribute("role"),
+      ariaLabel: activeElement.getAttribute("aria-label"),
     } : null,
     elements,
-    elementsTruncated: candidates.length > maxElements,
+    elementsTruncated: candidates.length > maxElements || openShadowTraversalTruncated,
     fileInputs,
-    fileInputsTruncated: fileCandidates.length > fileLimit,
+    fileInputsTruncated: fileCandidates.length > fileLimit || openShadowTraversalTruncated,
     images,
-    imagesTruncated: imageCandidates.length > imageLimit,
+    imagesTruncated: imageCandidates.length > imageLimit || openShadowTraversalTruncated,
+    videos,
+    videosTruncated: videoCandidates.length > videoLimit || openShadowTraversalTruncated,
+    openShadowRoots: roots.length - 1,
+    openShadowTraversalTruncated,
   };
 }
 
@@ -3930,6 +4066,50 @@ async function pageSetFileInput(selector, file, options = {}) {
 }
 
 async function pageVideoFileTransfer(phase, selector, transferId, payload, options = {}) {
+  // A literal " >>> " between CSS selectors crosses one observed OPEN root.
+  // Quoted/escaped delimiters and CSS functional selectors remain ordinary CSS.
+  function observedSelectorParts(value) {
+    if (typeof value !== "string" || !value.includes(" >>> ")) return [value];
+    const parts = [];
+    let start = 0, quote = "", escaped = false, nesting = 0, comment = false;
+    for (let index = 0; index < value.length; index++) {
+      const char = value[index], next = value[index + 1];
+      if (comment) { if (char === "*" && next === "/") { comment = false; index++; } continue; }
+      if (escaped) { escaped = false; continue; }
+      if (char === "\\") { escaped = true; continue; }
+      if (quote) { if (char === quote) quote = ""; continue; }
+      if (char === '"' || char === "'") { quote = char; continue; }
+      if (char === "/" && next === "*") { comment = true; index++; continue; }
+      if (char === "[" || char === "(") nesting++;
+      else if (char === "]" || char === ")") nesting = Math.max(0, nesting - 1);
+      if (nesting === 0 && value.startsWith(" >>> ", index)) {
+        parts.push(value.slice(start, index));
+        start = index + 5; index += 4;
+      }
+    }
+    parts.push(value.slice(start));
+    return parts;
+  }
+  function queryObservedSelector(value, normalFirst = false) {
+    const parts = observedSelectorParts(value);
+    if (parts.length === 1) return normalFirst
+      ? [document.querySelector(value)].filter(Boolean) : [...document.querySelectorAll(value)];
+    const reject = (code, message) => { const error = new Error(message); error.code = code; throw error; };
+    if (value.length > 10000 || parts.length > 17 || parts.some(part => !part.trim())) {
+      reject("CHROME_SELECTOR_INVALID", "The observed shadow selector exceeds its bounds or has an empty segment.");
+    }
+    let root = document;
+    for (let index = 0; index < parts.length; index++) {
+      const matches = [...root.querySelectorAll(parts[index])];
+      if (matches.length > 1) reject("CHROME_SELECTOR_AMBIGUOUS", "Every observed shadow selector segment must identify exactly one element.");
+      if (!matches.length || index === parts.length - 1) return matches;
+      const host = matches[0], shadow = host.shadowRoot;
+      if (!host.isConnected || host.ownerDocument !== document || !shadow
+          || shadow.mode !== "open" || shadow.host !== host) return [];
+      root = shadow;
+    }
+    return [];
+  }
   let stage = "resolve";
   let actionDispatched = false;
   let fileAssigned = false;
@@ -4007,8 +4187,11 @@ async function pageVideoFileTransfer(phase, selector, transferId, payload, optio
       if (!current || current.expiresAt <= Date.now()) clearTransfer(id);
     }
     const resolveMatches = () => {
-      try { return [...document.querySelectorAll(selector)]; }
-      catch { fail("CHROME_ELEMENT_NOT_FOUND", "The observed video-file selector is invalid."); }
+      try { return queryObservedSelector(selector); }
+      catch (error) {
+        if (typeof error?.code === "string" && error.code.startsWith("CHROME_")) throw error;
+        fail("CHROME_ELEMENT_NOT_FOUND", "The observed video-file selector is invalid.");
+      }
     };
     const assertTarget = (element, current = null) => {
       assertDeadline();
@@ -4222,6 +4405,59 @@ async function pageVideoFileTransfer(phase, selector, transferId, payload, optio
 }
 
 async function pageClick(selector, options = {}) {
+  // A literal " >>> " between CSS selectors crosses one observed OPEN root.
+  // Quoted/escaped delimiters and CSS functional selectors remain ordinary CSS.
+  function observedSelectorParts(value) {
+    if (typeof value !== "string" || !value.includes(" >>> ")) return [value];
+    const parts = [];
+    let start = 0, quote = "", escaped = false, nesting = 0, comment = false;
+    for (let index = 0; index < value.length; index++) {
+      const char = value[index], next = value[index + 1];
+      if (comment) { if (char === "*" && next === "/") { comment = false; index++; } continue; }
+      if (escaped) { escaped = false; continue; }
+      if (char === "\\") { escaped = true; continue; }
+      if (quote) { if (char === quote) quote = ""; continue; }
+      if (char === '"' || char === "'") { quote = char; continue; }
+      if (char === "/" && next === "*") { comment = true; index++; continue; }
+      if (char === "[" || char === "(") nesting++;
+      else if (char === "]" || char === ")") nesting = Math.max(0, nesting - 1);
+      if (nesting === 0 && value.startsWith(" >>> ", index)) {
+        parts.push(value.slice(start, index));
+        start = index + 5; index += 4;
+      }
+    }
+    parts.push(value.slice(start));
+    return parts;
+  }
+  function queryObservedSelector(value, normalFirst = false) {
+    const parts = observedSelectorParts(value);
+    if (parts.length === 1) return normalFirst
+      ? [document.querySelector(value)].filter(Boolean) : [...document.querySelectorAll(value)];
+    const reject = (code, message) => { const error = new Error(message); error.code = code; throw error; };
+    if (value.length > 10000 || parts.length > 17 || parts.some(part => !part.trim())) {
+      reject("CHROME_SELECTOR_INVALID", "The observed shadow selector exceeds its bounds or has an empty segment.");
+    }
+    let root = document;
+    for (let index = 0; index < parts.length; index++) {
+      const matches = [...root.querySelectorAll(parts[index])];
+      if (matches.length > 1) reject("CHROME_SELECTOR_AMBIGUOUS", "Every observed shadow selector segment must identify exactly one element.");
+      if (!matches.length || index === parts.length - 1) return matches;
+      const host = matches[0], shadow = host.shadowRoot;
+      if (!host.isConnected || host.ownerDocument !== document || !shadow
+          || shadow.mode !== "open" || shadow.host !== host) return [];
+      root = shadow;
+    }
+    return [];
+  }
+  function deepActiveElement() {
+    let active = document.activeElement;
+    for (let depth = 0; depth < 16; depth++) {
+      const shadow = active?.shadowRoot;
+      if (!shadow || shadow.mode !== "open" || shadow.host !== active || !shadow.activeElement) break;
+      active = shadow.activeElement;
+    }
+    return active;
+  }
   let actionDispatched = false;
   let clickDispatched = false;
   let focusEventFallbackUsed = false;
@@ -4242,7 +4478,8 @@ async function pageClick(selector, options = {}) {
       error.code = "CHROME_CLICK_STRATEGY_INVALID";
       throw error;
     }
-    const element = document.querySelector(selector);
+    const element = queryObservedSelector(selector, true)[0];
+    const isShadowSelector = observedSelectorParts(selector).length > 1;
     if (!(element instanceof Element)) {
       const error = new Error("No element matches the click selector.");
       error.code = "CHROME_ELEMENT_NOT_FOUND";
@@ -4270,7 +4507,7 @@ async function pageClick(selector, options = {}) {
     const documentAtStart = document;
     const assertTarget = () => {
       assertDeadline();
-      if (document !== documentAtStart || !element.isConnected || !element.matches(selector)) {
+      if (document !== documentAtStart || !element.isConnected || (isShadowSelector ? queryObservedSelector(selector, true)[0] !== element : !element.matches(selector))) {
         const error = new Error("The click target changed during dispatch; its outcome must be reconciled.");
         error.code = "CHROME_TARGET_CHANGED";
         throw error;
@@ -4312,7 +4549,7 @@ async function pageClick(selector, options = {}) {
         try { element.focus({ preventScroll: true }); } catch {}
         return;
       }
-      const activeBefore = document.activeElement;
+      const activeBefore = deepActiveElement();
       const types = ["focus", "focusin"];
       const observed = new Set();
       const observe = (event) => { if (event.target === element) observed.add(event.type); };
@@ -4322,13 +4559,13 @@ async function pageClick(selector, options = {}) {
       }
       try {
         try { element.focus({ preventScroll: true }); } catch {}
-        if (activeBefore !== element && document.activeElement === element && !document.hasFocus()) {
+        if (activeBefore !== element && deepActiveElement() === element && !document.hasFocus()) {
           const relatedTarget = activeBefore instanceof Element
             && activeBefore !== document.body && activeBefore !== document.documentElement ? activeBefore : null;
           for (const type of types) {
             if (observed.has(type)) continue;
             assertFocusable();
-            if (document.activeElement !== element) {
+            if (deepActiveElement() !== element) {
               const error = new Error("The page changed focus before the remaining click events.");
               error.code = "CHROME_FOCUS_CHANGED";
               throw error;
@@ -4338,7 +4575,7 @@ async function pageClick(selector, options = {}) {
             element.dispatchEvent(new FocusEvent(type, { bubbles: type === "focusin", composed: true, relatedTarget }));
           }
           assertFocusable();
-          if (document.activeElement !== element) {
+          if (deepActiveElement() !== element) {
             const error = new Error("The page changed focus before the remaining click events.");
             error.code = "CHROME_FOCUS_CHANGED";
             throw error;
@@ -4372,7 +4609,7 @@ async function pageClick(selector, options = {}) {
         dataState: target.getAttribute("data-state"),
         // Only popups explicitly associated with this control influence
         // activation. Unrelated dialogs/tooltips must never swallow a click.
-        associatedPopupCount: popupIds.filter((id) => isVisible(document.getElementById(id))).length,
+        associatedPopupCount: popupIds.filter((id) => isVisible((target.getRootNode?.() || document).getElementById?.(id))).length,
       };
     };
     const stateChanged = (before, after) => before.ariaExpanded !== after.ariaExpanded
@@ -4893,6 +5130,59 @@ async function pageKeypress(selector, key, options = {}) {
 }
 
 async function pageFill(selector, value, submit, options = {}) {
+  // A literal " >>> " between CSS selectors crosses one observed OPEN root.
+  // Quoted/escaped delimiters and CSS functional selectors remain ordinary CSS.
+  function observedSelectorParts(value) {
+    if (typeof value !== "string" || !value.includes(" >>> ")) return [value];
+    const parts = [];
+    let start = 0, quote = "", escaped = false, nesting = 0, comment = false;
+    for (let index = 0; index < value.length; index++) {
+      const char = value[index], next = value[index + 1];
+      if (comment) { if (char === "*" && next === "/") { comment = false; index++; } continue; }
+      if (escaped) { escaped = false; continue; }
+      if (char === "\\") { escaped = true; continue; }
+      if (quote) { if (char === quote) quote = ""; continue; }
+      if (char === '"' || char === "'") { quote = char; continue; }
+      if (char === "/" && next === "*") { comment = true; index++; continue; }
+      if (char === "[" || char === "(") nesting++;
+      else if (char === "]" || char === ")") nesting = Math.max(0, nesting - 1);
+      if (nesting === 0 && value.startsWith(" >>> ", index)) {
+        parts.push(value.slice(start, index));
+        start = index + 5; index += 4;
+      }
+    }
+    parts.push(value.slice(start));
+    return parts;
+  }
+  function queryObservedSelector(value, normalFirst = false) {
+    const parts = observedSelectorParts(value);
+    if (parts.length === 1) return normalFirst
+      ? [document.querySelector(value)].filter(Boolean) : [...document.querySelectorAll(value)];
+    const reject = (code, message) => { const error = new Error(message); error.code = code; throw error; };
+    if (value.length > 10000 || parts.length > 17 || parts.some(part => !part.trim())) {
+      reject("CHROME_SELECTOR_INVALID", "The observed shadow selector exceeds its bounds or has an empty segment.");
+    }
+    let root = document;
+    for (let index = 0; index < parts.length; index++) {
+      const matches = [...root.querySelectorAll(parts[index])];
+      if (matches.length > 1) reject("CHROME_SELECTOR_AMBIGUOUS", "Every observed shadow selector segment must identify exactly one element.");
+      if (!matches.length || index === parts.length - 1) return matches;
+      const host = matches[0], shadow = host.shadowRoot;
+      if (!host.isConnected || host.ownerDocument !== document || !shadow
+          || shadow.mode !== "open" || shadow.host !== host) return [];
+      root = shadow;
+    }
+    return [];
+  }
+  function deepActiveElement() {
+    let active = document.activeElement;
+    for (let depth = 0; depth < 16; depth++) {
+      const shadow = active?.shadowRoot;
+      if (!shadow || shadow.mode !== "open" || shadow.host !== active || !shadow.activeElement) break;
+      active = shadow.activeElement;
+    }
+    return active;
+  }
   let stage = "resolve";
   let actionDispatched = false;
   let targetReplaced = false;
@@ -4915,7 +5205,7 @@ async function pageFill(selector, value, submit, options = {}) {
     if (!["exact", "numeric"].includes(normalization)) fail("CHROME_FILL_NORMALIZATION_INVALID", "Fill normalization must be exact or numeric.");
     if (!["set-value", "insert-text", "text-input"].includes(requestedInputStrategy)) fail("CHROME_FILL_INPUT_STRATEGY_INVALID", "Fill input strategy must be set-value, insert-text, or text-input.");
     const documentAtStart = document;
-    const matches = [...document.querySelectorAll(selector)];
+    const matches = queryObservedSelector(selector);
     if (!matches.length) fail("CHROME_ELEMENT_NOT_FOUND", "No element matches the fill selector.");
     const isFillable = (candidate) => candidate?.isContentEditable
       || candidate instanceof HTMLInputElement || candidate instanceof HTMLTextAreaElement || candidate instanceof HTMLSelectElement;
@@ -4974,7 +5264,7 @@ async function pageFill(selector, value, submit, options = {}) {
       && (!identity.role || candidate.getAttribute("role") === identity.role);
     const resolveCurrent = () => {
       if (document !== documentAtStart) fail("CHROME_TARGET_CHANGED", "The document changed while filling.");
-      const fresh = [...document.querySelectorAll(selector)].filter(isFillable).filter(isVisible);
+      const fresh = queryObservedSelector(selector).filter(isFillable).filter(isVisible);
       if (element.isConnected && fresh.includes(element) && sameControl(element)) return element;
       const candidates = fresh.filter(sameControl);
       if (candidates.length !== 1) {
@@ -5054,7 +5344,7 @@ async function pageFill(selector, value, submit, options = {}) {
     const transitionFocus = (candidate, direction) => {
       const gainingFocus = direction === "focus";
       const types = gainingFocus ? ["focus", "focusin"] : ["blur", "focusout"];
-      const activeBefore = document.activeElement;
+      const activeBefore = deepActiveElement();
       const transitioning = gainingFocus ? activeBefore !== candidate : activeBefore === candidate;
       const observed = new Set();
       const observe = (event) => {
@@ -5066,7 +5356,7 @@ async function pageFill(selector, value, submit, options = {}) {
         assertEditable();
       };
       const transitionReached = () => gainingFocus
-        ? document.activeElement === candidate : document.activeElement !== candidate;
+        ? deepActiveElement() === candidate : deepActiveElement() !== candidate;
       assertCurrent();
       for (const type of types) {
         candidate.addEventListener(type, observe, true);
@@ -5077,7 +5367,7 @@ async function pageFill(selector, value, submit, options = {}) {
           try { candidate.focus({ preventScroll: true }); } catch { candidate.focus(); }
         } else {
           candidate.blur();
-          if (document.activeElement === candidate) fail("CHROME_FOCUS_CHANGED", "The field kept or regained focus during its requested blur commit.");
+          if (deepActiveElement() === candidate) fail("CHROME_FOCUS_CHANGED", "The field kept or regained focus during its requested blur commit.");
         }
         // In a genuinely inactive Chrome tab these native methods change
         // activeElement but can omit the entire focus event family. Supply
@@ -5135,7 +5425,7 @@ async function pageFill(selector, value, submit, options = {}) {
           : nativeTextEdit ? "native-insert-text" : "native-value-setter";
       let selectedValue = null;
       const assertNativeTextSelection = () => {
-        if (document.activeElement !== element || String(element.value) !== selectedValue
+        if (deepActiveElement() !== element || String(element.value) !== selectedValue
           || element.selectionStart !== 0 || element.selectionEnd !== selectedValue.length) {
           fail("CHROME_TEXT_EDIT_SELECTION_CHANGED", "The native text edit lost its focused full-value selection; no editing operation was dispatched.");
         }
@@ -5227,13 +5517,13 @@ async function pageFill(selector, value, submit, options = {}) {
       assertEditable();
       // Replacements can lose DOM focus. Focus the verified replacement before
       // its real blur method so its own focusout/blur handlers receive the commit.
-      if (document.activeElement !== element) focus(element);
+      if (deepActiveElement() !== element) focus(element);
       const beforeBlur = element;
       resolveCurrent();
       if (element !== beforeBlur) fail("CHROME_TARGET_CHANGED", "The field changed while preparing its blur commit.");
       assertEditable();
       assertDeadline();
-      if (document.activeElement !== element) fail("CHROME_FOCUS_CHANGED", "The field did not receive focus for its requested blur commit.");
+      if (deepActiveElement() !== element) fail("CHROME_FOCUS_CHANGED", "The field did not receive focus for its requested blur commit.");
       transitionFocus(element, "blur");
       await waitForFrameworkCommit();
       resolveCurrent();
@@ -5259,7 +5549,7 @@ async function pageFill(selector, value, submit, options = {}) {
         associatedErrors: [...new Set(
           [element.getAttribute("aria-errormessage"), element.getAttribute("aria-describedby")]
             .filter(Boolean).join(" ").split(/\s+/).filter(Boolean),
-        )].map((id) => document.getElementById(id)).filter(isVisible)
+        )].map((id) => (element.getRootNode?.() || document).getElementById?.(id)).filter(isVisible)
           .map((node) => String(node.innerText || node.textContent || "").trim().slice(0, 1000)),
       };
     };
@@ -5913,16 +6203,7 @@ async function dispatch(message) {
       const payload = phase === "begin" ? args.file
         : phase === "chunk" ? { index: args.index, offset: args.offset, base64: args.base64 } : null;
       const storageKey = videoFileTransferStorageKey(tab.id, args.expectedDocumentId, args.transferId);
-      if (phase === "begin") {
-        const activeVideoTransferCount = await countActiveVideoFileTransfers();
-        if (activeVideoTransferCount >= MAX_ACTIVE_VIDEO_FILE_TRANSFERS) {
-          const error = new Error("The extension already has the maximum number of active video-file transfers.");
-          error.code = "CHROME_VIDEO_FILE_TRANSFER_LIMIT";
-          error.details = { activeVideoTransferCount };
-          throw error;
-        }
-        await markActiveVideoFileTransfer(storageKey);
-      }
+      if (phase === "begin") await admitActiveVideoFileTransfer(storageKey);
       const operation = () => executeInTab(tab.id, pageVideoFileTransfer, [
         phase, String(args.selector || ""), args.transferId, payload, {
           tabId: tab.id, expectedDocumentId: args.expectedDocumentId, expectedUrl: tab.url,
