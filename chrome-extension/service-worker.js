@@ -1,7 +1,7 @@
 const NATIVE_HOST = "io.github.alexanderradahl.mac_developer_bridge";
 const VERSION = "0.2.20";
 // Immutable identity of the executing release, sent on every native handshake.
-const LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011.3";
+const LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011.4";
 const NATIVE_INSTANCE_ID = crypto.randomUUID();
 const NATIVE_OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_NATIVE_OPERATIONS = 5_000;
@@ -3591,7 +3591,7 @@ function pageSnapshot(maxTextChars, maxElements) {
     };
   });
   const videoLimit = Math.min(32, maxElements);
-  const videoCandidates = observedElements.filter(element => element.tagName === "VIDEO");
+  const videoCandidates = observedElements.filter(element => element.tagName === "VIDEO" && element.isConnected === true);
   const videos = videoCandidates.slice(0, videoLimit).map(element => {
     const source = String(element.currentSrc || element.src || "");
     return {
@@ -3610,6 +3610,56 @@ function pageSnapshot(maxTextChars, maxElements) {
       renderedWidth: element.getBoundingClientRect().width,
       renderedHeight: element.getBoundingClientRect().height,
       error: element.error ? { code: element.error.code } : null,
+    };
+  });
+  const finiteNumberOrNull = value => typeof value === "number" && Number.isFinite(value) ? value : null;
+  const resourceTimingLimit = 60;
+  let resourceTimings = [];
+  let resourceTimingsTruncated = false;
+  try {
+    const entries = globalThis.performance?.getEntriesByType?.("resource");
+    const entryCount = Number.isSafeInteger(entries?.length) ? entries.length : 0;
+    const firstEntry = Math.max(0, entryCount - resourceTimingLimit);
+    resourceTimingsTruncated = firstEntry > 0;
+    for (let index = firstEntry; index < entryCount; index++) {
+      try {
+        const entry = entries[index];
+        if (!entry || typeof entry !== "object") continue;
+        resourceTimings.push({
+          urlWithoutQuery: mediaUrlWithoutQuery(entry.name),
+          startTime: finiteNumberOrNull(entry.startTime),
+          duration: finiteNumberOrNull(entry.duration),
+          transferSize: finiteNumberOrNull(entry.transferSize),
+          encodedBodySize: finiteNumberOrNull(entry.encodedBodySize),
+          decodedBodySize: finiteNumberOrNull(entry.decodedBodySize),
+          initiatorType: typeof entry.initiatorType === "string" ? entry.initiatorType.slice(0, 100) : null,
+          responseStatus: finiteNumberOrNull(entry.responseStatus),
+        });
+      } catch {
+        resourceTimingsTruncated = true;
+      }
+    }
+  } catch {
+    resourceTimings = [];
+  }
+  const progressLimit = Math.min(32, maxElements);
+  const progressCandidates = observedElements.filter(element =>
+    element.tagName === "PROGRESS" || element.getAttribute("role") === "progressbar");
+  const numericAttribute = value => typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))
+    ? Number(value) : null;
+  const progressIndicators = progressCandidates.slice(0, progressLimit).map(element => {
+    const ariaValueNow = element.getAttribute("aria-valuenow");
+    const ariaValueMax = element.getAttribute("aria-valuemax");
+    const nativeProgress = element.tagName === "PROGRESS";
+    return {
+      selector: selectorFor(element),
+      tag: element.tagName.toLowerCase(),
+      visible: Boolean(visibleBox(element)),
+      value: nativeProgress ? finiteNumberOrNull(element.value) : numericAttribute(ariaValueNow),
+      max: nativeProgress ? finiteNumberOrNull(element.max) : numericAttribute(ariaValueMax),
+      ariaValueNow: ariaValueNow?.slice(0, 100) ?? null,
+      ariaValueMax: ariaValueMax?.slice(0, 100) ?? null,
+      ariaLabel: element.getAttribute("aria-label")?.slice(0, 500) ?? null,
     };
   });
   const activeElement = deepActiveElement();
@@ -3633,6 +3683,10 @@ function pageSnapshot(maxTextChars, maxElements) {
     imagesTruncated: imageCandidates.length > imageLimit || openShadowTraversalTruncated,
     videos,
     videosTruncated: videoCandidates.length > videoLimit || openShadowTraversalTruncated,
+    resourceTimings,
+    resourceTimingsTruncated,
+    progressIndicators,
+    progressIndicatorsTruncated: progressCandidates.length > progressLimit || openShadowTraversalTruncated,
     openShadowRoots: roots.length - 1,
     openShadowTraversalTruncated,
   };

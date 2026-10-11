@@ -345,7 +345,7 @@ assert.match(source, /const MAX_ACTIVE_VIDEO_FILE_TRANSFERS = 2;/);
 assert.match(source, /activeVideoTransferCount >= MAX_ACTIVE_VIDEO_FILE_TRANSFERS/);
 assert.match(source, /extensionReloadReserved = true;/);
 assert.match(source, /countActiveVideoFileTransfers\(\)/);
-assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011\.3"/);
+assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011\.4"/);
 assert.match(source, /selector.length > 10000/);
 for (const phase of ["Begin", "Chunk", "Commit", "Abort"]) {
   assert.ok(source.includes('case "tabs.videoFile' + phase + '":'));
