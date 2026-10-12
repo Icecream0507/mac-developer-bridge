@@ -1,0 +1,78 @@
+{
+  "created_at_utc": "2026-10-12T19:33:56.732533+00:00",
+  "state": "proposal_only_not_installed_or_reloaded",
+  "release": {
+    "version": "0.2.22",
+    "build_id": "browser-layout-snapshot-20261012.1"
+  },
+  "changes": [
+    {
+      "path": "bridge.mjs",
+      "before_sha256": "2aa05ea0fdace2918c57348100dba24b53796cc7feb6cd8b9287097ce01e3ec4",
+      "candidate_sha256": "0e261e0e8e33da72c62e81342a262a7bd28d4e68de206c108a5c365d69a854a0"
+    },
+    {
+      "path": "chrome-extension/service-worker.js",
+      "before_sha256": "e63a28deeb8862143a14bc39ebc678262ace2599954992e27271907788208974",
+      "candidate_sha256": "9229c3609b84d4023e5b56ed606ea3edd7cbbaf6ea5d7db777aabbc220d166e5"
+    },
+    {
+      "path": "chrome-extension/manifest.json",
+      "before_sha256": "0d12f5e425573da8ad0afd0063ab1a81115a126a85b6136ce66f9f8622b388b1",
+      "candidate_sha256": "9ef27298afefa3117094c73f63ca3e50e0cf0a130a1c6458c26bfd62481bee3c"
+    },
+    {
+      "path": "tests/chrome-background.mjs",
+      "before_sha256": "85c9e128a2c2e006a91646ed94dfe475eabd503e0525bb76264dd3a0836516ec",
+      "candidate_sha256": "a956fb2c54b99153abc18bc4b6fdbbbae4ff8a259a2404dd47dc4b8fda358428"
+    },
+    {
+      "path": "tests/chrome-snapshot-media-diagnostics.mjs",
+      "before_sha256": "2aefe66a14d3ce30d38189ccb89fd00e390fbc1ea5650e41183f2b574c0dbb1b",
+      "candidate_sha256": "8d52fe3ebbfe5c5519bddfe49e2d5646827136965ab7284c9b5a9c99cce50908"
+    },
+    {
+      "path": "tests/chrome-snapshot-layout-diagnostics.mjs",
+      "before_sha256": null,
+      "candidate_sha256": "f23a87f832fa25cf3c1a3b915d2fdeda58cb957bccd1d175e96c224b26357be8"
+    }
+  ],
+  "unchanged_active_prerequisites": {
+    "lib/chrome-extension-client.mjs": "bc5c441a8475db9bd0b844982ed03302d205398f1242fe9c2993710f0aa4c9a7",
+    "scripts/chrome-native-host.mjs": "0740d356e804a5f04af68fab5cd9b271aba468c9f8b80c61f1a163b14f20fa6f"
+  },
+  "patch_sha256": "dbf98bf03c358141c3928ea25daa27d713c9c8359bfa28a0a58f2997b968c495",
+  "baseline_capture": {
+    "captured_at_utc": "2026-10-12T19:23:20.766663+00:00",
+    "sha256": {
+      "bridge.mjs": "2aa05ea0fdace2918c57348100dba24b53796cc7feb6cd8b9287097ce01e3ec4",
+      "chrome-extension/service-worker.js": "e63a28deeb8862143a14bc39ebc678262ace2599954992e27271907788208974",
+      "chrome-extension/manifest.json": "0d12f5e425573da8ad0afd0063ab1a81115a126a85b6136ce66f9f8622b388b1",
+      "lib/chrome-extension-client.mjs": "bc5c441a8475db9bd0b844982ed03302d205398f1242fe9c2993710f0aa4c9a7",
+      "scripts/chrome-native-host.mjs": "0740d356e804a5f04af68fab5cd9b271aba468c9f8b80c61f1a163b14f20fa6f",
+      "tests/chrome-background.mjs": "85c9e128a2c2e006a91646ed94dfe475eabd503e0525bb76264dd3a0836516ec",
+      "tests/chrome-snapshot-media-diagnostics.mjs": "2aefe66a14d3ce30d38189ccb89fd00e390fbc1ea5650e41183f2b574c0dbb1b"
+    }
+  },
+  "verification": {
+    "forward_check": {
+      "returncode": 0,
+      "stderr": ""
+    },
+    "forward_apply": {
+      "returncode": 0,
+      "stderr": ""
+    },
+    "forward_candidate_hashes_match": true,
+    "reverse_check": {
+      "returncode": 0,
+      "stderr": ""
+    },
+    "reverse_apply": {
+      "returncode": 0,
+      "stderr": ""
+    },
+    "reverse_baseline_hashes_match": true
+  },
+  "active_sources_unchanged_at_capture": true
+}

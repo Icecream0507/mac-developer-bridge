@@ -1,0 +1,10 @@
+{
+  "task": "Preserve bounded opt-in Chrome layout snapshot diagnostic patch",
+  "branch": "fix/browser-layout-patch-20261012",
+  "base_commit": "94704cf6858f7ac5e315181a1b2d4a54e9df64b0",
+  "scope": "This patch-artifact directory only",
+  "bd_create_exit_code": 1,
+  "bd_status": "blocked_by_existing_ancestor_database_missing_issue_prefix",
+  "shared_database_reinitialized_or_repaired": false,
+  "bd_sync_status": "Installed CLI has no sync command, as verified during the preceding CSV patch task"
+}

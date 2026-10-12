@@ -1,0 +1,15 @@
+{
+  "runtime_receipt.json": "a7fbffea22313e3d5ec6b12c8a5732c9812b16e9db866ec6a1e1c9b4f3aabcb5",
+  "test_dependency_hashes.json": "dd9e139cb53d6a21114d5a48b7b1e44f33e2e122648f23d325846de1787344b6",
+  "baseline_manifest.json": "c9ded5bc7631b84f06b13c682847935f98101f9117345cd02ab282e92845a619",
+  "verify_apply.py": "85b7f88f1a8de21174c82a556e7647ec0170bb6811acc97d61fae31fd8861e7b",
+  "guard-test-results.json": "a109dc116ae43a1a18a83431b324201d6eb2d235a89df3d74f04bcfc5d170e95",
+  "README.md": "13dd884bde68095533ff75859b25721a3d5570018fe3b23d8950c10c02055055",
+  "snapshot-layout-only.patch": "dbf98bf03c358141c3928ea25daa27d713c9c8359bfa28a0a58f2997b968c495",
+  "validation.json": "f0324d7bf39de80ff409deba91b810b61b0e133aeac852f03dbf1bd74fd838b2",
+  ".gitattributes": "fb25a78a6381f5646d71aacea4486f6aeeeb03c4d71740227011024be0d20a8f",
+  "manifest.json": "6a4447f87ec92723ebe57c908623a3c3dd2ad7e2d31d6912fbb8b40f3cc851f9",
+  "tracking.json": "b02eae3bd9853db6c8ad2eadf9c5b944ff6210f4983a2789e5f960f523615249",
+  "source_apply_receipt.json": "e7469152e7d0adb718d10ed70a8d97070edfe4c8f32b6389d90e97ad3a719811",
+  "files/tests/chrome-snapshot-layout-diagnostics.mjs": "f23a87f832fa25cf3c1a3b915d2fdeda58cb957bccd1d175e96c224b26357be8"
+}

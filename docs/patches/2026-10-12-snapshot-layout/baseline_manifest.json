@@ -1,0 +1,12 @@
+{
+  "captured_at_utc": "2026-10-12T19:23:20.766663+00:00",
+  "sha256": {
+    "bridge.mjs": "2aa05ea0fdace2918c57348100dba24b53796cc7feb6cd8b9287097ce01e3ec4",
+    "chrome-extension/service-worker.js": "e63a28deeb8862143a14bc39ebc678262ace2599954992e27271907788208974",
+    "chrome-extension/manifest.json": "0d12f5e425573da8ad0afd0063ab1a81115a126a85b6136ce66f9f8622b388b1",
+    "lib/chrome-extension-client.mjs": "bc5c441a8475db9bd0b844982ed03302d205398f1242fe9c2993710f0aa4c9a7",
+    "scripts/chrome-native-host.mjs": "0740d356e804a5f04af68fab5cd9b271aba468c9f8b80c61f1a163b14f20fa6f",
+    "tests/chrome-background.mjs": "85c9e128a2c2e006a91646ed94dfe475eabd503e0525bb76264dd3a0836516ec",
+    "tests/chrome-snapshot-media-diagnostics.mjs": "2aefe66a14d3ce30d38189ccb89fd00e390fbc1ea5650e41183f2b574c0dbb1b"
+  }
+}

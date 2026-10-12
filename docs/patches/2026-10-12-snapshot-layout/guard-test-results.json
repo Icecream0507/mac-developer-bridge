@@ -1,0 +1,43 @@
+{
+  "active_check_was_read_only": true,
+  "disposable_apply_and_source_readback_passed": true,
+  "mismatched_baseline_refused_without_mutation": true,
+  "no_runtime_reload_or_process_restart": true,
+  "results": [
+    {
+      "mode": "check",
+      "expected_success": true,
+      "returncode": 0,
+      "stdout": "{\"baseline_hashes_match\": true, \"patch_roundtrip_verified\": true, \"target_modified\": false}\n",
+      "stderr": ""
+    },
+    {
+      "mode": "check",
+      "expected_success": true,
+      "returncode": 0,
+      "stdout": "{\"baseline_hashes_match\": true, \"patch_roundtrip_verified\": true, \"target_modified\": false}\n",
+      "stderr": ""
+    },
+    {
+      "mode": "apply",
+      "expected_success": true,
+      "returncode": 0,
+      "stdout": "{\n  \"applied_at_utc\": \"2026-10-12T19:35:01.655400+00:00\",\n  \"state\": \"candidate_sources_applied\",\n  \"patch_sha256\": \"dbf98bf03c358141c3928ea25daa27d713c9c8359bfa28a0a58f2997b968c495\",\n  \"release\": {\n    \"version\": \"0.2.22\",\n    \"build_id\": \"browser-layout-snapshot-20261012.1\"\n  },\n  \"candidate_sha256\": {\n    \"bridge.mjs\": \"0e261e0e8e33da72c62e81342a262a7bd28d4e68de206c108a5c365d69a854a0\",\n    \"chrome-extension/service-worker.js\": \"9229c3609b84d4023e5b56ed606ea3edd7cbbaf6ea5d7db777aabbc220d166e5\",\n    \"chrome-extension/manifest.json\": \"9ef27298afefa3117094c73f63ca3e50e0cf0a130a1c6458c26bfd62481bee3c\",\n    \"tests/chrome-background.mjs\": \"a956fb2c54b99153abc18bc4b6fdbbbae4ff8a259a2404dd47dc4b8fda358428\",\n    \"tests/chrome-snapshot-media-diagnostics.mjs\": \"8d52fe3ebbfe5c5519bddfe49e2d5646827136965ab7284c9b5a9c99cce50908\",\n    \"tests/chrome-snapshot-layout-diagnostics.mjs\": \"f23a87f832fa25cf3c1a3b915d2fdeda58cb957bccd1d175e96c224b26357be8\"\n  },\n  \"no_reload_or_process_restart\": true,\n  \"runtime_readiness_verified\": false\n}\n",
+      "stderr": ""
+    },
+    {
+      "mode": "installed",
+      "expected_success": true,
+      "returncode": 0,
+      "stdout": "{\"candidate_source_hashes_match\": true, \"runtime_readiness_verified\": false}\n",
+      "stderr": ""
+    },
+    {
+      "mode": "check",
+      "expected_success": false,
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Exact baseline hash mismatch: chrome-extension/service-worker.js\n"
+    }
+  ]
+}

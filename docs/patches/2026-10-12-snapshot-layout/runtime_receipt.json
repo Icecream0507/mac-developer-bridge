@@ -1,0 +1,43 @@
+{
+  "evidence_source": "Parent agent's report of supported public reload/status and public stdio snapshot results; no customer snapshot is retained here.",
+  "source_applied_at_utc": "2026-10-12T19:35:36Z",
+  "reload": {
+    "operation_id": "wbe-layout-diagnostic-quiet-reload-20261012",
+    "count": 1,
+    "guarded": true,
+    "quiet_boundary_confirmed": true
+  },
+  "ready": {
+    "observed_at_utc": "2026-10-12T19:35:43.511Z",
+    "version": "0.2.22",
+    "build_id": "browser-layout-snapshot-20261012.1",
+    "profile_matches": true
+  },
+  "preserved": {
+    "shared_http_pid": 73110,
+    "shared_http_restarted": false,
+    "shared_http_build_changed": false,
+    "background_only": true,
+    "relaxed_settings_unchanged": true
+  },
+  "live_diagnostic": {
+    "public_stdio_call_succeeded": true,
+    "default_url_header_and_control_count_unchanged": true,
+    "control_count": 13,
+    "observed_elements": 643,
+    "traversal_truncated": false,
+    "graph_root_count": 1,
+    "graph_viewport_count": 1,
+    "graph_root_and_viewport_have_positive_area": true,
+    "node_count": 5,
+    "all_sampled_nodes_have_positive_area": true,
+    "all_sampled_nodes_computed_visibility": "hidden",
+    "canvas_count": 0,
+    "iframe_count": 0,
+    "document_visibility": "hidden",
+    "document_has_focus": false,
+    "hidden_content_or_app_state_read": false,
+    "stored_email_copy_verified": false
+  },
+  "privacy": "Only bounded generic renderer metadata is included. No URL, customer name, message body, contact record, sender profile, credentials, frame content, or network response is included."
+}

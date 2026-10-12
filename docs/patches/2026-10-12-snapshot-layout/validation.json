@@ -1,0 +1,89 @@
+{
+  "environment": "isolated scratch; synthetic DOM and isolated local fake-host fixtures",
+  "tests": [
+    {
+      "command": [
+        "node",
+        "--check",
+        "bridge.mjs"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "result": "Syntax check passed"
+    },
+    {
+      "command": [
+        "node",
+        "--check",
+        "chrome-extension/service-worker.js"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "result": "Syntax check passed"
+    },
+    {
+      "command": [
+        "node",
+        "tests/chrome-snapshot-layout-diagnostics.mjs",
+        "/path/to/exact-captured-baseline"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "passed": 12,
+      "total": 12
+    },
+    {
+      "command": [
+        "node",
+        "tests/chrome-snapshot-media-diagnostics.mjs"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "result": "chrome-snapshot-media-diagnostics: bounds, privacy, and passive-read checks passed"
+    },
+    {
+      "command": [
+        "node",
+        "tests/chrome-open-shadow.mjs"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "passed": 16,
+      "total": 16
+    },
+    {
+      "command": [
+        "node",
+        "tests/chrome-csv-file-input.mjs"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "passed": 59,
+      "total": 59
+    },
+    {
+      "command": [
+        "node",
+        "tests/chrome-image-file-input.mjs"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "passed": 26,
+      "total": 26
+    },
+    {
+      "command": [
+        "node",
+        "tests/chrome-background.mjs"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "result": "background Chrome test passed"
+    }
+  ],
+  "source_apply_readback": {
+    "candidate_source_hashes_match": true,
+    "runtime_readiness_verified": false
+  },
+  "runtime_receipt": "runtime_receipt.json"
+}
