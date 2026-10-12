@@ -1,0 +1,21 @@
+{
+  "task": "Preserve the reviewed CSV file-input fix as a scoped patch artifact",
+  "scope": "Only the new artifact directory; preserve active runtime and unrelated working-tree changes",
+  "status": "complete",
+  "beads": {
+    "onboarding": "completed",
+    "task_creation": "blocked",
+    "reason": "Existing ancestor Dolt database lacks issue_prefix; non-destructive initialization refuses to overwrite the existing database",
+    "existing_database_modified": false,
+    "legacy_sync": "Installed CLI has no bd sync command; no task existed to sync after task creation was blocked"
+  },
+  "follow_up": [
+    {
+      "task": "Integrate prior reviewed background-browser/upload dependencies into coherent source history, then port the CSV delta",
+      "status": "open",
+      "priority": "normal",
+      "scope_excludes": "Unrelated dirty runtime, ChatGPT, workspace and application/contact changes"
+    }
+  ],
+  "verification": "Exact hashes and forward/reverse roundtrip verified; separate source integration remains open"
+}

@@ -1,0 +1,36 @@
+diff --git a/tests/chrome-background.mjs b/tests/chrome-background.mjs
+--- a/tests/chrome-background.mjs
++++ b/tests/chrome-background.mjs
+@@ -219,14 +219,14 @@
+   assert.ok(manifest.permissions.includes("tabGroups"));
+   assert.ok(manifest.permissions.includes("storage"));
+   assert.ok(manifest.icons?.["16"] && manifest.icons?.["128"]);
+-  assert.equal(manifest.version, "0.2.20");
++  assert.equal(manifest.version, "0.2.21");
+   assert.equal(manifest.permissions.includes("debugger"), false, "realistic click support must not require Chrome debugger permission");
+   await Promise.all([16, 32, 48, 128].map(async (size) => {
+     const stat = await fs.stat(path.join(root, "chrome-extension", "icons", `icon-${size}.png`));
+     assert.ok(stat.size > 0, `expected non-empty ${size}px extension icon`);
+   }));
+   const workerSource = await fs.readFile(path.join(root, "chrome-extension", "service-worker.js"), "utf8");
+-  assert.match(workerSource, /const VERSION = "0\.2\.20"/);
++  assert.match(workerSource, /const VERSION = "0\.2\.21"/);
+   assert.match(workerSource, /WORKSPACE_GROUP_TITLE = "MDB"/);
+   assert.match(workerSource, /chrome\.tabs\.group/);
+   assert.match(workerSource, /chrome\.tabGroups\.query/);
+@@ -293,9 +293,13 @@
+   assert.match(workerSource, /async function pageFill\(/);
+   assert.match(workerSource, /CHROME_FILL_NOT_STICKY/);
+   assert.match(workerSource, /fallbackTimer = setTimeout\(finish, 250\)/);
+-  assert.match(workerSource, /const matches = \[\.\.\.document\.querySelectorAll\(selector\)\]/);
++  const fileInputAction = workerSource.match(/async function pageSetFileInput\([\s\S]*?\n}/)?.[0] || "";
++  assert.match(fileInputAction, /let matches;\s*try \{ matches = \[\.\.\.document\.querySelectorAll\(selector\)\]; \}/);
++  assert.match(fileInputAction, /catch \{ fail\("CHROME_ELEMENT_NOT_FOUND", "The observed file selector is invalid\."\); \}/);
++  assert.match(fileInputAction, /if \(matches\.length !== 1\) fail\("CHROME_FILE_INPUT_AMBIGUOUS",/);
+   assert.match(workerSource, /requestSubmit:visible-submitter/);
+-  assert.match(workerSource, /if \(unique\(candidate\)\) return candidate/);
++  assert.match(workerSource, /const matches = root\.querySelectorAll\(candidate\); return matches\.length === 1 && matches\[0\] === element;/);
++  assert.match(workerSource, /if \(unique\(candidate\)\) local = candidate/);
+   const fillCase = workerSource.match(/case "tabs\.fill":[\s\S]*?default:/)?.[0] || "";
+   assert.match(fillCase, /executeInTab\(tab\.id, pageFill/);
+   assert.match(fillCase, /"MAIN"/);

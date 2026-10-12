@@ -1,0 +1,462 @@
+{
+  "recorded_date_utc": "2026-10-12",
+  "directly_executed": [
+    {
+      "command": "node tests/chrome-csv-file-input.mjs",
+      "exit_code": 0,
+      "results": {
+        "passed": 59,
+        "total": 59,
+        "results": [
+          {
+            "name": "prepare-preserves-exact-reviewed-bytes",
+            "passed": true
+          },
+          {
+            "name": "utf8-bom-crlf-quoted-comma-quote-newline-preserved",
+            "passed": true
+          },
+          {
+            "name": "relative-path",
+            "passed": true
+          },
+          {
+            "name": "non-normalized-path",
+            "passed": true
+          },
+          {
+            "name": "missing-file",
+            "passed": true
+          },
+          {
+            "name": "directory",
+            "passed": true
+          },
+          {
+            "name": "symlink-file",
+            "passed": true
+          },
+          {
+            "name": "symlink-parent",
+            "passed": true
+          },
+          {
+            "name": "mime-required",
+            "passed": true
+          },
+          {
+            "name": "mime-plain-text-not-enabled",
+            "passed": true
+          },
+          {
+            "name": "mime-active-format-not-enabled",
+            "passed": true
+          },
+          {
+            "name": "extension-required",
+            "passed": true
+          },
+          {
+            "name": "digest-required",
+            "passed": true
+          },
+          {
+            "name": "digest-malformed",
+            "passed": true
+          },
+          {
+            "name": "digest-mismatch",
+            "passed": true
+          },
+          {
+            "name": "empty",
+            "passed": true
+          },
+          {
+            "name": "invalid-utf8",
+            "passed": true
+          },
+          {
+            "name": "nul-binary",
+            "passed": true
+          },
+          {
+            "name": "control-binary",
+            "passed": true
+          },
+          {
+            "name": "unclosed-quoted-field",
+            "passed": true
+          },
+          {
+            "name": "unescaped-quote",
+            "passed": true
+          },
+          {
+            "name": "different-record-width",
+            "passed": true
+          },
+          {
+            "name": "exact-cap-fits-native-envelope",
+            "passed": true
+          },
+          {
+            "name": "one-byte-over-cap",
+            "passed": true
+          },
+          {
+            "name": "dom-accept-.csv",
+            "passed": true
+          },
+          {
+            "name": "dom-accept-text/csv",
+            "passed": true
+          },
+          {
+            "name": "dom-accept-text/*",
+            "passed": true
+          },
+          {
+            "name": "dom-accept-.CSV, application/pdf",
+            "passed": true
+          },
+          {
+            "name": "dom-accept-empty",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-accept-image/*",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-accept-image/png",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-accept-.xlsx",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-accept-application/pdf",
+            "passed": true
+          },
+          {
+            "name": "dom-utf8-multiline-file",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-disabled",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-aria-disabled",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-directory",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-wrong-input-type",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-ambiguous",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-stale-url",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-nonempty-csv-without-overwrite",
+            "passed": true
+          },
+          {
+            "name": "dom-no-repeat-after-successful-csv-selection",
+            "passed": true
+          },
+          {
+            "name": "dom-replaced-during-digest-never-redirects",
+            "passed": true
+          },
+          {
+            "name": "dom-replaced-after-input-sync",
+            "passed": true
+          },
+          {
+            "name": "dom-replaced-after-input-microtask",
+            "passed": true
+          },
+          {
+            "name": "dom-accept-changed-after-input-stops-change",
+            "passed": true
+          },
+          {
+            "name": "dom-deadline-before-assignment",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-payload-hash",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-payload-base64",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-payload-size",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-payload-mime",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-payload-extension",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-payload-binary",
+            "passed": true
+          },
+          {
+            "name": "dom-reject-payload-invalid-utf8",
+            "passed": true
+          },
+          {
+            "name": "image-accept-and-existing-selection-semantics-unchanged",
+            "passed": true
+          },
+          {
+            "name": "csv-filled-during-hash-cannot-overwrite-new-selection",
+            "passed": true
+          },
+          {
+            "name": "worker-csv-keeps-url-grant-and-document-pin",
+            "passed": true
+          },
+          {
+            "name": "csv-fingerprint-binds-file-document-and-url-grants",
+            "passed": true
+          },
+          {
+            "name": "csv-audit-redacts-both-public-and-wire-sensitive-data",
+            "passed": true
+          }
+        ],
+        "temporaryDirectoryRemoved": true,
+        "providerAccessed": false,
+        "browserAccessed": false
+      },
+      "tested_file_sha256": "4a4b71bbe29119d00cfa223d433e9319b30883033db63c3610b025ec29687a63"
+    },
+    {
+      "command": "node tests/chrome-image-file-input.mjs",
+      "exit_code": 0,
+      "results": {
+        "passed": 26,
+        "total": 26,
+        "results": [
+          {
+            "name": "prepare-image/png",
+            "passed": true
+          },
+          {
+            "name": "prepare-image/jpeg",
+            "passed": true
+          },
+          {
+            "name": "prepare-image/webp",
+            "passed": true
+          },
+          {
+            "name": "relative-path",
+            "passed": true
+          },
+          {
+            "name": "empty-path",
+            "passed": true
+          },
+          {
+            "name": "missing-file",
+            "passed": true
+          },
+          {
+            "name": "directory",
+            "passed": true
+          },
+          {
+            "name": "symlink",
+            "passed": true
+          },
+          {
+            "name": "explicit-mime-required",
+            "passed": true
+          },
+          {
+            "name": "unsupported-mime",
+            "passed": true
+          },
+          {
+            "name": "mime-does-not-match-signature",
+            "passed": true
+          },
+          {
+            "name": "active-format-is-not-a-raster-image",
+            "passed": true
+          },
+          {
+            "name": "empty-file",
+            "passed": true
+          },
+          {
+            "name": "symlink-in-parent-component",
+            "passed": true
+          },
+          {
+            "name": "non-normalized-path",
+            "passed": true
+          },
+          {
+            "name": "raster-with-mismatched-extension",
+            "passed": true
+          },
+          {
+            "name": "truncated-png-header",
+            "passed": true
+          },
+          {
+            "name": "mismatched-review-hash",
+            "passed": true
+          },
+          {
+            "name": "malformed-review-hash",
+            "passed": true
+          },
+          {
+            "name": "review-hash-required",
+            "passed": true
+          },
+          {
+            "name": "exact-byte-cap-and-transport-budget",
+            "passed": true
+          },
+          {
+            "name": "one-byte-over-cap",
+            "passed": true
+          },
+          {
+            "name": "audit-redacts-public-caller",
+            "passed": true
+          },
+          {
+            "name": "audit-redacts-internal-wire",
+            "passed": true
+          },
+          {
+            "name": "file-diagnostics-retain-only-bounded-public-fields",
+            "passed": true
+          },
+          {
+            "name": "upload-fingerprint-binds-reviewed-file-and-document",
+            "passed": true
+          }
+        ],
+        "temporaryDirectoryRemoved": true
+      }
+    },
+    {
+      "command": "node tests/chrome-background.mjs",
+      "exit_code": 0,
+      "stdout": "background Chrome test passed",
+      "tested_file_sha256": "85c9e128a2c2e006a91646ed94dfe475eabd503e0525bb76264dd3a0836516ec"
+    }
+  ],
+  "implementing_agent_reported": [
+    {
+      "command": "npm run check",
+      "outcome": "passed"
+    },
+    {
+      "command": "node tests/chrome-transport-reliability.mjs",
+      "outcome": "passed",
+      "groups": 16
+    },
+    {
+      "check": "installed Chrome public-background-route loopback fixture",
+      "outcome": "passed",
+      "observations": [
+        "image-only target rejects CSV",
+        "CSV target receives the exact reviewed SHA-256 bytes"
+      ]
+    }
+  ],
+  "artifact_roundtrip": {
+    "captured_baseline_hashes_reconstructed": true,
+    "baseline_check": {
+      "artifact": "csv-file-input-20261012",
+      "changed_file_count": 7,
+      "exact_hashes_verified": true,
+      "forward_reverse_roundtrip": true,
+      "mode": "check",
+      "reload_performed": false,
+      "target_modified": false,
+      "unchanged_prerequisite_count": 4
+    },
+    "mismatched_baseline_rejected_without_mutation": true,
+    "disposable_baseline_apply": {
+      "artifact": "csv-file-input-20261012",
+      "changed_file_count": 7,
+      "exact_hashes_verified": true,
+      "forward_reverse_roundtrip": true,
+      "mode": "apply",
+      "reload_performed": false,
+      "target_modified": true,
+      "unchanged_prerequisite_count": 4
+    },
+    "disposable_installed_check": {
+      "artifact": "csv-file-input-20261012",
+      "changed_file_count": 7,
+      "exact_hashes_verified": true,
+      "forward_reverse_roundtrip": true,
+      "mode": "installed",
+      "reload_performed": false,
+      "target_modified": false,
+      "unchanged_prerequisite_count": 4
+    },
+    "active_runtime_unchanged": true,
+    "temporary_directory_removed": true
+  },
+  "no_contact_data_in_fixture": true,
+  "source_identity": {
+    "bridge.mjs": {
+      "before": "c9f7cec6b55ed7fc7abd4d9b073538d9cad5364deae348df8fbe85abcf809c64",
+      "after": "2aa05ea0fdace2918c57348100dba24b53796cc7feb6cd8b9287097ce01e3ec4"
+    },
+    "chrome-extension/manifest.json": {
+      "before": "13c5c860f4bd630c4ee31747f051c1425b4298b51d41803a9513e9b1e5a86e56",
+      "after": "0d12f5e425573da8ad0afd0063ab1a81115a126a85b6136ce66f9f8622b388b1"
+    },
+    "chrome-extension/service-worker.js": {
+      "before": "09661ed883ebe71c714b5c996ba481bfd1e715262a1935d5a152c40ac7d0b283",
+      "after": "e63a28deeb8862143a14bc39ebc678262ace2599954992e27271907788208974"
+    },
+    "lib/chrome-csv-file.mjs": {
+      "before": null,
+      "after": "3379ce6f4c7efa26dfeb7b7a6ef78ee265eabe707516d40be49d93209f7b6a3c"
+    },
+    "package.json": {
+      "before": "78432a2f35f1a0d2781b048235924d1c26d27ed8b76834a0c5513a80485857c6",
+      "after": "109e4b9770346afc68df97cc0dd7abffff807a0a2889b2f359c6a713e32158a4"
+    },
+    "tests/chrome-csv-file-input.mjs": {
+      "before": null,
+      "after": "4a4b71bbe29119d00cfa223d433e9319b30883033db63c3610b025ec29687a63"
+    },
+    "tests/chrome-background.mjs": {
+      "before": "52041db83830828dddd90c1537cfa26072a3e34ebb5de551f272f92d89e8cf15",
+      "after": "85c9e128a2c2e006a91646ed94dfe475eabd503e0525bb76264dd3a0836516ec"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "captured_baseline_hashes_reconstructed": true,
+  "baseline_check": {
+    "artifact": "csv-file-input-20261012",
+    "changed_file_count": 7,
+    "exact_hashes_verified": true,
+    "forward_reverse_roundtrip": true,
+    "mode": "check",
+    "reload_performed": false,
+    "target_modified": false,
+    "unchanged_prerequisite_count": 4
+  },
+  "mismatched_baseline_rejected_without_mutation": true,
+  "disposable_baseline_apply": {
+    "artifact": "csv-file-input-20261012",
+    "changed_file_count": 7,
+    "exact_hashes_verified": true,
+    "forward_reverse_roundtrip": true,
+    "mode": "apply",
+    "reload_performed": false,
+    "target_modified": true,
+    "unchanged_prerequisite_count": 4
+  },
+  "disposable_installed_check": {
+    "artifact": "csv-file-input-20261012",
+    "changed_file_count": 7,
+    "exact_hashes_verified": true,
+    "forward_reverse_roundtrip": true,
+    "mode": "installed",
+    "reload_performed": false,
+    "target_modified": false,
+    "unchanged_prerequisite_count": 4
+  },
+  "active_runtime_unchanged": true,
+  "temporary_directory_removed": true
+}

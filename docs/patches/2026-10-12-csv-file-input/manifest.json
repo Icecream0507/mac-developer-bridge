@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "artifact": "csv-file-input-20261012",
+  "git_base_commit": "94704cf6858f7ac5e315181a1b2d4a54e9df64b0",
+  "git_base_branch": "feature/async-conversation-runs-20260914",
+  "installed_extension_version": "0.2.21",
+  "installed_extension_build_id": "browser-csv-file-upload-20261012.1",
+  "before_after_sha256": {
+    "bridge.mjs": {
+      "before": "c9f7cec6b55ed7fc7abd4d9b073538d9cad5364deae348df8fbe85abcf809c64",
+      "after": "2aa05ea0fdace2918c57348100dba24b53796cc7feb6cd8b9287097ce01e3ec4"
+    },
+    "chrome-extension/manifest.json": {
+      "before": "13c5c860f4bd630c4ee31747f051c1425b4298b51d41803a9513e9b1e5a86e56",
+      "after": "0d12f5e425573da8ad0afd0063ab1a81115a126a85b6136ce66f9f8622b388b1"
+    },
+    "chrome-extension/service-worker.js": {
+      "before": "09661ed883ebe71c714b5c996ba481bfd1e715262a1935d5a152c40ac7d0b283",
+      "after": "e63a28deeb8862143a14bc39ebc678262ace2599954992e27271907788208974"
+    },
+    "lib/chrome-csv-file.mjs": {
+      "before": null,
+      "after": "3379ce6f4c7efa26dfeb7b7a6ef78ee265eabe707516d40be49d93209f7b6a3c"
+    },
+    "package.json": {
+      "before": "78432a2f35f1a0d2781b048235924d1c26d27ed8b76834a0c5513a80485857c6",
+      "after": "109e4b9770346afc68df97cc0dd7abffff807a0a2889b2f359c6a713e32158a4"
+    },
+    "tests/chrome-csv-file-input.mjs": {
+      "before": null,
+      "after": "4a4b71bbe29119d00cfa223d433e9319b30883033db63c3610b025ec29687a63"
+    },
+    "tests/chrome-background.mjs": {
+      "before": "52041db83830828dddd90c1537cfa26072a3e34ebb5de551f272f92d89e8cf15",
+      "after": "85c9e128a2c2e006a91646ed94dfe475eabd503e0525bb76264dd3a0836516ec"
+    }
+  },
+  "unchanged_prerequisite_sha256": {
+    "lib/chrome-image-file.mjs": "47f6e35164d390d6e08781cb105041a801c552e0edb562ad0c6d120f41f7cc31",
+    "lib/chrome-operation-registry.mjs": "a11f3df727f7f2f648581a6a2c9e65584ca9fd12bad188fe59bd432e353e76cd",
+    "lib/chrome-extension-client.mjs": "bc5c441a8475db9bd0b844982ed03302d205398f1242fe9c2993710f0aa4c9a7",
+    "scripts/chrome-native-host.mjs": "0740d356e804a5f04af68fab5cd9b271aba468c9f8b80c61f1a163b14f20fa6f"
+  },
+  "patches": [
+    "csv-only.patch",
+    "background-test.patch"
+  ],
+  "additions": {
+    "tests/chrome-csv-file-input.mjs": "files/tests/chrome-csv-file-input.mjs"
+  },
+  "application_contract": "Apply only after every baseline and unchanged prerequisite digest matches. This patch is not directly applicable to the git base commit; the captured runtime contains prior reviewed background-browser changes.",
+  "artifact_sha256": {
+    ".gitattributes": "48ae38172c9dcccd6708f8e469595822827737849153e15877d97fd76de16ca5",
+    "README.md": "764ced63410348e15c786fb40067d1869e4335812272b2f577ca11254eadbf54",
+    "background-test.patch": "6d4f51d6c6a59e0eb42962cd87327534aec1deccb532e272c31acf26e10bdb82",
+    "csv-only.patch": "1b1375bb875324f9174d28a9f4572138f7ad9f9b342f5a2e3b738800ec443f6a",
+    "files/tests/chrome-csv-file-input.mjs": "4a4b71bbe29119d00cfa223d433e9319b30883033db63c3610b025ec29687a63",
+    "roundtrip-result.json": "7ee43f874602f226434f8ea698419c2abebe3eee5a62048bdf5cf1bb748c001f",
+    "tracking.json": "8824a111f01a944ac8c86510e05695c43dbe228f300d7d60e3620b26ea1878fa",
+    "validation.json": "bcd17c7b6f849edd7a7ecb5dff2b2e223f7c77dbd325ea70cbfb3a4031109147",
+    "verify_apply.py": "d5f71c89b6a9fd17a644e5e312b70a01834f41d0529e1dfe866149444c1ad6dd"
+  }
+}

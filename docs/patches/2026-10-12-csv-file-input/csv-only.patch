@@ -1,0 +1,405 @@
+diff --git a/bridge.mjs b/bridge.mjs
+--- a/bridge.mjs
++++ b/bridge.mjs
+@@ -13,6 +13,7 @@
+ import { backgroundChromeCall, backgroundChromeStatus, backgroundChromeOperationStatus, safeChromeDiagnostics } from "./lib/chrome-extension-client.mjs";
+ 
+ import { prepareChromeImageFile } from "./lib/chrome-image-file.mjs";
++import { prepareChromeCsvFile } from "./lib/chrome-csv-file.mjs";
+ import { prepareChromeVideoFile, MAX_CHROME_VIDEO_FILE_BYTES } from "./lib/chrome-video-file.mjs";
+ import { transferChromeVideoFile } from "./lib/chrome-video-upload.mjs";
+ 
+@@ -513,16 +514,17 @@
+     };
+   }
+   if (tool === "chrome_set_file_input") {
+-    // Neither a private local path nor image bytes belong in any audit mode.
++    // Neither a private local path nor image/CSV bytes belong in any audit mode.
+     const mimeType = args?.mime_type ?? args?.file?.mimeType;
+     const digest = args?.expected_sha256 ?? args?.file?.sha256;
+     return {
+       tab_id: args?.tab_id ?? args?.tabId,
+       selector: args?.selector,
+       expected_document_id: args?.expected_document_id ?? args?.expectedDocumentId,
+-      mime_type: ["image/png", "image/jpeg", "image/webp"].includes(mimeType) ? mimeType : null,
++      mime_type: ["image/png", "image/jpeg", "image/webp", "text/csv"].includes(mimeType) ? mimeType : null,
+       expected_sha256: typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest) ? digest : null,
+-      image_size: Number.isSafeInteger(args?.file?.size) && args.file.size <= 1024 * 1024 ? args.file.size : null,
++      image_size: mimeType !== "text/csv" && Number.isSafeInteger(args?.file?.size) && args.file.size <= 1024 * 1024 ? args.file.size : null,
++      csv_size: mimeType === "text/csv" && Number.isSafeInteger(args?.file?.size) && args.file.size <= 1024 * 1024 ? args.file.size : null,
+       operation_id: args?.operation_id,
+       local_path: "[REDACTED_LOCAL_IMAGE_PATH]",
+     };
+@@ -1098,18 +1100,18 @@
+   },
+   {
+     name: "chrome_set_file_input",
+-    title: "Select one reviewed image in a Chrome file input",
+-    description: "Assign one explicit local PNG, JPEG or WebP image of at most 1 MiB to an exact observed file input in the expected Chrome document. The absolute regular non-symlink file must match the supplied SHA-256, MIME and extension. Sends one synthetic input/change pair without opening a picker, focusing, clicking or submitting. Existing URL grants and profile checks apply. Selection may start the website's own upload; read the resulting page and reconcile the operation ID before further action. Does not prove saved application acceptance.",
++    title: "Select one reviewed image or CSV in a Chrome file input",
++    description: "Assign one explicit local PNG, JPEG, WebP image or UTF-8 CSV of at most 1 MiB to an exact observed file input in the expected Chrome document. CSV records must have consistent columns and valid comma-separated quoting; CSV selection requires an empty input. The absolute regular non-symlink file must match the supplied SHA-256, MIME and extension. Sends one synthetic input/change pair without opening a picker, focusing, clicking or submitting. Existing URL grants and profile checks apply. Selection may start the website's own upload; read the resulting page and reconcile the operation ID before further action. Does not prove saved application acceptance.",
+     inputSchema: {
+       type: "object",
+       properties: {
+         tab_id: { type: "integer", minimum: 0 },
+         selector: { type: "string", minLength: 1, maxLength: 10000 },
+         expected_document_id: { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$", description: "Exact documentId from a fresh chrome_snapshot. A replacement document is never targeted." },
+-        local_path: { type: "string", minLength: 1, maxLength: 4096, description: "Absolute normalized path to one reviewed regular non-symlink image. No URLs, directories or discovery." },
+-        mime_type: { type: "string", enum: ["image/png", "image/jpeg", "image/webp"] },
+-        expected_sha256: { type: "string", pattern: "^[a-f0-9]{64}$", description: "SHA-256 of the reviewed exact image bytes." },
+-        operation_id: { type: "string", minLength: 8, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$", description: "Stable ID for this exact image selection. Never automatically replay an uncertain upload." },
++        local_path: { type: "string", minLength: 1, maxLength: 4096, description: "Absolute normalized path to one reviewed regular non-symlink image or CSV. No URLs, directories or discovery." },
++        mime_type: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "text/csv"] },
++        expected_sha256: { type: "string", pattern: "^[a-f0-9]{64}$", description: "SHA-256 of the reviewed exact image or CSV bytes." },
++        operation_id: { type: "string", minLength: 8, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$", description: "Stable ID for this exact file selection. Never automatically replay an uncertain upload." },
+       },
+       required: ["tab_id", "selector", "expected_document_id", "local_path", "mime_type", "expected_sha256", "operation_id"],
+       additionalProperties: false,
+@@ -3993,10 +3995,12 @@
+       if (selector.length > 10_000) throw new Error("'selector' must be at most 10000 characters");
+       if (!/^[A-Za-z0-9_-]{1,128}$/.test(expectedDocumentId)) throw new Error("'expected_document_id' must identify the observed document");
+       const operationId = chromeOperationId(args, { required: true });
+-      const file = await prepareChromeImageFile({
++      const mimeType = requireString(args, "mime_type");
++      const prepareFile = mimeType === "text/csv" ? prepareChromeCsvFile : prepareChromeImageFile;
++      const file = await prepareFile({
+         localPath: requireString(args, "local_path"),
+         expectedSha256: requireString(args, "expected_sha256"),
+-        mimeType: requireString(args, "mime_type"),
++        mimeType,
+       });
+       return await callBackgroundChrome(name, "tabs.setFileInput", {
+         tabId, selector, expectedDocumentId, file,
+diff --git a/chrome-extension/manifest.json b/chrome-extension/manifest.json
+--- a/chrome-extension/manifest.json
++++ b/chrome-extension/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "manifest_version": 3,
+   "name": "Mac Developer Bridge Background Browser",
+-  "version": "0.2.20",
++  "version": "0.2.21",
+   "description": "Lets Mac Developer Bridge operate approved Chrome tabs without bringing Chrome to the foreground.",
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq9QjCNUI8xWx8wNSCITv4TFRy2pYhd77cDUTmYFJqduaYwhplrkvbo1BB9wTn7VBKLe8ohNp4fnZz9T03il69oRPsYGRb5aHAdSVaYdCrOiGs7GN00wvwUf6d2lQeuslDd53SpTnXZdtGRMVRBeK4X4NyEksQHzxKpaeaRlT0R9qREp+TdiLfEh5Z6UImZ0ZeBVn7efazrNBYMARBjas3A/AbXUyH654TVMOAqePUpgj129g8ZGQjcPqOFKGqhAyyCVhpbJBU+1Kt7sX6wbIIREtjmryW7sqMba7TnubqCv2qTPLZNeHQVQaQpl75cYdL26lh8PXwSTHeQKX+3KwHwIDAQAB",
+   "permissions": [
+diff --git a/chrome-extension/service-worker.js b/chrome-extension/service-worker.js
+--- a/chrome-extension/service-worker.js
++++ b/chrome-extension/service-worker.js
+@@ -1,7 +1,7 @@
+ const NATIVE_HOST = "io.github.alexanderradahl.mac_developer_bridge";
+-const VERSION = "0.2.20";
++const VERSION = "0.2.21";
+ // Immutable identity of the executing release, sent on every native handshake.
+-const LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011.4";
++const LOADED_EXTENSION_BUILD_ID = "browser-csv-file-upload-20261012.1";
+ const NATIVE_INSTANCE_ID = crypto.randomUUID();
+ const NATIVE_OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
+ const MAX_NATIVE_OPERATIONS = 5_000;
+@@ -3998,6 +3998,55 @@
+ }
+ 
+ async function pageSetFileInput(selector, file, options = {}) {
++  const isCsv = file?.mimeType === "text/csv";
++  function csvStructureIsValid(bytes) {
++    let value;
++    try { value = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
++    catch { return false; }
++    if (!value.length || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) return false;
++    let quoted = false, afterQuote = false, fieldStart = true, recordStarted = false;
++    let columns = 1, width = null, records = 0;
++    const finishRecord = () => {
++      if (!recordStarted && columns === 1) return true;
++      if (width === null) width = columns;
++      if (columns !== width) return false;
++      records++;
++      return true;
++    };
++    for (let index = 0; index < value.length; index++) {
++      const char = value[index];
++      if (quoted) {
++        if (char === '"') {
++          if (value[index + 1] === '"') index++;
++          else { quoted = false; afterQuote = true; }
++        }
++        continue;
++      }
++      if (afterQuote && char !== "," && char !== "\r" && char !== "\n") return false;
++      if (char === '"') {
++        if (!fieldStart) return false;
++        quoted = true;
++        recordStarted = true;
++        fieldStart = false;
++      } else if (char === ",") {
++        columns++;
++        recordStarted = true;
++        fieldStart = true;
++        afterQuote = false;
++      } else if (char === "\r" || char === "\n") {
++        if (char === "\r" && value[index + 1] === "\n") index++;
++        if (!finishRecord()) return false;
++        columns = 1;
++        fieldStart = true;
++        afterQuote = false;
++        recordStarted = false;
++      } else {
++        recordStarted = true;
++        fieldStart = false;
++      }
++    }
++    return !quoted && finishRecord() && records > 0;
++  }
+   let stage = "resolve";
+   let actionDispatched = false;
+   let fileAssigned = false;
+@@ -4011,7 +4060,7 @@
+   const deadline = Number(options.deadlineMs);
+   const fail = (code, message) => { const error = new Error(message); error.code = code; throw error; };
+   const assertDeadline = () => {
+-    if (Number.isFinite(deadline) && Date.now() >= deadline) fail("CHROME_OPERATION_DEADLINE_EXCEEDED", "The image-selection deadline elapsed; reconcile before another action.");
++    if (Number.isFinite(deadline) && Date.now() >= deadline) fail("CHROME_OPERATION_DEADLINE_EXCEEDED", "The file-selection deadline elapsed; reconcile before another action.");
+   };
+   const metadata = () => ({
+     stage, actionDispatched, fileAssigned, inputEventDispatched, changeEventDispatched,
+@@ -4030,13 +4079,13 @@
+     try { matches = [...document.querySelectorAll(selector)]; }
+     catch { fail("CHROME_ELEMENT_NOT_FOUND", "The observed file selector is invalid."); }
+     if (!matches.length) fail("CHROME_ELEMENT_NOT_FOUND", "No element matches the observed file selector.");
+-    if (matches.length !== 1) fail("CHROME_FILE_INPUT_AMBIGUOUS", "The image-selection target must match exactly one element.");
++    if (matches.length !== 1) fail("CHROME_FILE_INPUT_AMBIGUOUS", "The file-selection target must match exactly one element.");
+     const element = matches[0];
+     if (!(element instanceof HTMLInputElement) || element.type !== "file") fail("CHROME_ELEMENT_NOT_FILE_INPUT", "The selected element is not a file input.");
+     const assertTarget = () => {
+       assertDeadline();
+       if (document !== documentAtStart || window.document !== documentAtStart || document.documentElement !== rootAtStart || location.href !== urlAtStart) {
+-        fail("CHROME_DOCUMENT_CHANGED", "The original document changed during image selection.");
++        fail("CHROME_DOCUMENT_CHANGED", "The original document changed during file selection.");
+       }
+       if (!element.isConnected || element.ownerDocument !== documentAtStart
+           || document.querySelectorAll(selector).length !== 1 || document.querySelector(selector) !== element) {
+@@ -4047,6 +4096,9 @@
+       if (element.disabled || element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") {
+         fail("CHROME_ELEMENT_DISABLED", "The file input is disabled.");
+       }
++      if (isCsv && !fileAssigned && element.files?.length) {
++        fail("CHROME_FILE_SELECTION_CHANGED", "The CSV input already has a selection; no existing file was replaced.");
++      }
+       if (element.webkitdirectory || element.hasAttribute("webkitdirectory") || element.hasAttribute("directory")) {
+         fail("CHROME_FILE_DIRECTORY_UNSUPPORTED", "Directory selection is not supported.");
+       }
+@@ -4054,22 +4106,22 @@
+     assertTarget();
+     stage = "validate-file";
+     if (!file || typeof file !== "object" || !/^[A-Za-z0-9][A-Za-z0-9._ -]{0,199}$/.test(file.name || "")
+-        || !["image/png", "image/jpeg", "image/webp"].includes(file.mimeType)
++        || !["image/png", "image/jpeg", "image/webp", "text/csv"].includes(file.mimeType)
+         || !Number.isSafeInteger(file.size) || file.size < 1 || file.size > 1024 * 1024
+         || !Number.isSafeInteger(file.lastModified) || file.lastModified < 0
+         || !/^[a-f0-9]{64}$/.test(file.sha256 || "")
+         || typeof file.base64 !== "string" || file.base64.length > 1398104
+         || file.base64.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(file.base64)) {
+-      fail("CHROME_FILE_PAYLOAD_INVALID", "The reviewed image payload is invalid.");
+-    }
+-    const extensions = { "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"], "image/webp": [".webp"] };
++      fail("CHROME_FILE_PAYLOAD_INVALID", "The reviewed file payload is invalid.");
++    }
++    const extensions = { "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"], "image/webp": [".webp"], "text/csv": [".csv"] };
+     if (!extensions[file.mimeType].some(extension => file.name.toLowerCase().endsWith(extension))) {
+-      fail("CHROME_FILE_PAYLOAD_INVALID", "The reviewed image extension does not match its MIME type.");
++      fail("CHROME_FILE_PAYLOAD_INVALID", "The reviewed file extension does not match its MIME type.");
+     }
+     const binary = atob(file.base64);
+-    if (binary.length !== file.size) fail("CHROME_FILE_PAYLOAD_INVALID", "The image byte length does not match its reviewed payload.");
++    if (binary.length !== file.size) fail("CHROME_FILE_PAYLOAD_INVALID", "The file byte length does not match its reviewed payload.");
+     const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+-    const signatureMatches = file.mimeType === "image/png"
++    const signatureMatches = isCsv ? csvStructureIsValid(bytes) : file.mimeType === "image/png"
+       ? bytes.length >= 24 && [137,80,78,71,13,10,26,10].every((value, index) => bytes[index] === value)
+         && String.fromCharCode(...bytes.slice(12,16)) === "IHDR"
+         && new DataView(bytes.buffer).getUint32(16) > 0 && new DataView(bytes.buffer).getUint32(20) > 0
+@@ -4080,19 +4132,19 @@
+           && String.fromCharCode(...bytes.slice(8,12)) === "WEBP"
+           && ["VP8 ", "VP8L", "VP8X"].includes(String.fromCharCode(...bytes.slice(12,16)))
+           && new DataView(bytes.buffer).getUint32(4, true) + 8 === bytes.length;
+-    if (!signatureMatches) fail("CHROME_FILE_PAYLOAD_INVALID", "The image signature does not match its reviewed MIME type.");
+-    if (!globalThis.crypto?.subtle) fail("CHROME_FILE_PAYLOAD_INVALID", "The document cannot verify the reviewed image digest.");
++    if (!signatureMatches) fail("CHROME_FILE_PAYLOAD_INVALID", "The file signature does not match its reviewed MIME type.");
++    if (!globalThis.crypto?.subtle) fail("CHROME_FILE_PAYLOAD_INVALID", "The document cannot verify the reviewed file digest.");
+     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+     if ([...digest].map(value => value.toString(16).padStart(2, "0")).join("") !== file.sha256) {
+-      fail("CHROME_FILE_PAYLOAD_INVALID", "The image digest does not match its reviewed payload.");
++      fail("CHROME_FILE_PAYLOAD_INVALID", "The file digest does not match its reviewed payload.");
+     }
+     assertTarget();
+     const assertAccept = () => {
+       const accept = element.accept.trim().toLowerCase();
+       const tokens = accept.split(",").map(value => value.trim()).filter(Boolean);
+-      if (accept && !tokens.some(token => token === file.mimeType || token === "image/*"
++      if (accept && !tokens.some(token => token === file.mimeType || token === file.mimeType.split("/")[0] + "/*"
+           || token.startsWith(".") && file.name.toLowerCase().endsWith(token))) {
+-        fail("CHROME_FILE_ACCEPT_MISMATCH", "The file input does not accept the reviewed image type.");
++        fail("CHROME_FILE_ACCEPT_MISMATCH", "The file input does not accept the reviewed file type.");
+       }
+     };
+     assertAccept();
+diff --git a/lib/chrome-csv-file.mjs b/lib/chrome-csv-file.mjs
+new file mode 100644
+--- /dev/null
++++ b/lib/chrome-csv-file.mjs
+@@ -0,0 +1,127 @@
++import crypto from "node:crypto";
++import fs from "node:fs";
++import fsp from "node:fs/promises";
++import path from "node:path";
++
++export const MAX_CHROME_CSV_FILE_BYTES = 1024 * 1024;
++function csvError(code, message) {
++  const error = new Error(message);
++  error.code = code;
++  return error;
++}
++
++function csvStructureIsValid(bytes) {
++  let value;
++  try { value = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
++  catch { return false; }
++  if (!value.length || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) return false;
++  let quoted = false, afterQuote = false, fieldStart = true, recordStarted = false;
++  let columns = 1, width = null, records = 0;
++  const finishRecord = () => {
++    if (!recordStarted && columns === 1) return true;
++    if (width === null) width = columns;
++    if (columns !== width) return false;
++    records++;
++    return true;
++  };
++  for (let index = 0; index < value.length; index++) {
++    const char = value[index];
++    if (quoted) {
++      if (char === '"') {
++        if (value[index + 1] === '"') index++;
++        else { quoted = false; afterQuote = true; }
++      }
++      continue;
++    }
++    if (afterQuote && char !== "," && char !== "\r" && char !== "\n") return false;
++    if (char === '"') {
++      if (!fieldStart) return false;
++      quoted = true;
++      recordStarted = true;
++      fieldStart = false;
++    } else if (char === ",") {
++      columns++;
++      recordStarted = true;
++      fieldStart = true;
++      afterQuote = false;
++    } else if (char === "\r" || char === "\n") {
++      if (char === "\r" && value[index + 1] === "\n") index++;
++      if (!finishRecord()) return false;
++      columns = 1;
++      fieldStart = true;
++      afterQuote = false;
++      recordStarted = false;
++    } else {
++      recordStarted = true;
++      fieldStart = false;
++    }
++  }
++  return !quoted && finishRecord() && records > 0;
++}
++
++// Only an explicit file supplied by the caller is read. This helper never
++// discovers paths, follows symlinks, fetches URLs, or returns a private path.
++export async function prepareChromeCsvFile({ localPath, expectedSha256, mimeType } = {}) {
++  if (typeof localPath !== "string" || !path.isAbsolute(localPath) || localPath.includes("\0")
++      || localPath.length > 4096 || path.resolve(localPath) !== localPath) {
++    throw csvError("CHROME_CSV_PATH_INVALID", "An absolute normalized CSV path is required.");
++  }
++  if (mimeType !== "text/csv") throw csvError("CHROME_CSV_MIME_INVALID", "Only text/csv files are supported.");
++  if (typeof expectedSha256 !== "string" || !/^[a-f0-9]{64}$/.test(expectedSha256)) {
++    throw csvError("CHROME_CSV_HASH_MISMATCH", "The expected SHA-256 CSV digest is required.");
++  }
++  let handle;
++  try {
++    const initial = await fsp.lstat(localPath);
++    if (initial.isSymbolicLink() || await fsp.realpath(localPath) !== localPath) {
++      throw csvError("CHROME_CSV_SYMLINK", "The explicit CSV path must not contain a symlink.");
++    }
++    if (!initial.isFile()) throw csvError("CHROME_CSV_NOT_REGULAR", "The explicit CSV must be a regular file.");
++    if (initial.size < 1 || initial.size > MAX_CHROME_CSV_FILE_BYTES) {
++      throw csvError("CHROME_CSV_TOO_LARGE", "The CSV must be between 1 byte and 1 MiB.");
++    }
++    handle = await fsp.open(localPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
++    const before = await handle.stat();
++    if (!before.isFile()) throw csvError("CHROME_CSV_NOT_REGULAR", "The explicit CSV must be a regular file.");
++    if (before.dev !== initial.dev || before.ino !== initial.ino || before.size !== initial.size
++        || before.mtimeMs !== initial.mtimeMs || before.ctimeMs !== initial.ctimeMs) {
++      throw csvError("CHROME_CSV_CHANGED", "The CSV changed before it could be read.");
++    }
++    const buffer = Buffer.alloc(before.size + 1);
++    let length = 0;
++    while (length < buffer.length) {
++      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
++      if (!bytesRead) break;
++      length += bytesRead;
++    }
++    const after = await handle.stat();
++    const current = await fsp.lstat(localPath);
++    if (length !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs
++        || after.ctimeMs !== before.ctimeMs || current.isSymbolicLink()
++        || current.dev !== before.dev || current.ino !== before.ino
++        || await fsp.realpath(localPath) !== localPath) {
++      throw csvError("CHROME_CSV_CHANGED", "The CSV changed while it was being read.");
++    }
++    const bytes = buffer.subarray(0, length);
++    if (!csvStructureIsValid(bytes)) {
++      throw csvError("CHROME_CSV_SIGNATURE_MISMATCH", "The CSV must be valid UTF-8 comma-separated records with consistent columns, valid quoting, and no binary control bytes.");
++    }
++    const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
++    if (sha256 !== expectedSha256) throw csvError("CHROME_CSV_HASH_MISMATCH", "The CSV no longer matches the reviewed SHA-256 digest.");
++    const name = path.basename(localPath);
++    if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,199}$/.test(name)) {
++      throw csvError("CHROME_CSV_PATH_INVALID", "Use an CSV filename containing ordinary letters, digits, spaces, dots, underscores or hyphens.");
++    }
++    const permittedExtensions = { "text/csv": [".csv"] };
++    if (!permittedExtensions[mimeType].includes(path.extname(name).toLowerCase())) {
++      throw csvError("CHROME_CSV_SIGNATURE_MISMATCH", "The CSV filename extension does not match its MIME type.");
++    }
++    return { name, mimeType, size: bytes.length, sha256, base64: bytes.toString("base64"), lastModified: Math.floor(before.mtimeMs) };
++  } catch (error) {
++    if (typeof error?.code === "string" && error.code.startsWith("CHROME_CSV_")) throw error;
++    // Filesystem error strings contain local paths. Never forward or audit them.
++    throw csvError(error?.code === "ELOOP" ? "CHROME_CSV_SYMLINK" : "CHROME_CSV_READ_FAILED", "The explicit CSV could not be read safely.");
++  } finally {
++    if (handle) await handle.close().catch(() => {});
++  }
++}
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -6,21 +6,22 @@
+   "scripts": {
+     "start": "node bridge.mjs",
+     "start:http": "node mcp-http.mjs",
+-    "check": "node --check bridge.mjs && node --check mcp-http.mjs && node --check lib/chatgpt-responses-adapter.mjs && node --check lib/chrome-extension-client.mjs && node --check lib/chrome-operation-registry.mjs && node --check scripts/chrome-native-host.mjs && node --check chrome-extension/service-worker.js && node --check lib/chrome-image-file.mjs && node --check scripts/mcp-call.mjs && node --check lib/chrome-video-file.mjs && node --check lib/chrome-video-upload.mjs && node --check scripts/mcp-call-stdio.mjs",
+-    "test": "node tests/smoke.mjs && node tests/integration.mjs && node tests/adversarial.mjs && node tests/chatgpt-responses.mjs && node tests/http.mjs && node tests/oauth.mjs && node tests/pty.mjs && node tests/federation.mjs && node tests/chatgpt-conversation.mjs && node tests/chatgpt-runtime.mjs && node tests/chatgpt-conversation-runs.mjs && node tests/chrome-workspace-capacity.mjs && node tests/chrome-fill-background.mjs && node tests/chrome-action-correctness.mjs && node tests/chrome-transport-reliability.mjs && node tests/chatgpt-handoff-diagnostics.mjs && node tests/chrome-background.mjs && node tests/chatgpt-installation-status.mjs && bash tests/installer-mock.sh && node tests/chrome-image-file-input.mjs && node tests/chrome-paste-content.mjs && node tests/chrome-video-file-prepare.mjs && node tests/chrome-video-upload.mjs && node tests/chrome-video-file-input.mjs && node tests/chrome-open-shadow.mjs && node tests/chrome-snapshot-media-diagnostics.mjs",
++    "check": "node --check bridge.mjs && node --check mcp-http.mjs && node --check lib/chatgpt-responses-adapter.mjs && node --check lib/chrome-extension-client.mjs && node --check lib/chrome-operation-registry.mjs && node --check scripts/chrome-native-host.mjs && node --check chrome-extension/service-worker.js && node --check lib/chrome-image-file.mjs && node --check scripts/mcp-call.mjs && node --check lib/chrome-video-file.mjs && node --check lib/chrome-video-upload.mjs && node --check scripts/mcp-call-stdio.mjs && node --check lib/chrome-csv-file.mjs",
++    "test": "node tests/smoke.mjs && node tests/integration.mjs && node tests/adversarial.mjs && node tests/chatgpt-responses.mjs && node tests/http.mjs && node tests/oauth.mjs && node tests/pty.mjs && node tests/federation.mjs && node tests/chatgpt-conversation.mjs && node tests/chatgpt-runtime.mjs && node tests/chatgpt-conversation-runs.mjs && node tests/chrome-workspace-capacity.mjs && node tests/chrome-fill-background.mjs && node tests/chrome-action-correctness.mjs && node tests/chrome-transport-reliability.mjs && node tests/chatgpt-handoff-diagnostics.mjs && node tests/chrome-background.mjs && node tests/chatgpt-installation-status.mjs && bash tests/installer-mock.sh && node tests/chrome-image-file-input.mjs && node tests/chrome-paste-content.mjs && node tests/chrome-video-file-prepare.mjs && node tests/chrome-video-upload.mjs && node tests/chrome-video-file-input.mjs && node tests/chrome-open-shadow.mjs && node tests/chrome-snapshot-media-diagnostics.mjs && node tests/chrome-csv-file-input.mjs",
+     "test:bridge-repair": "node tests/chatgpt-runtime.mjs && node tests/chatgpt-installation-status.mjs && node tests/chrome-background.mjs",
+     "test:browser": "node tests/chrome-actions-real-browser.mjs",
+     "test:browser-reliability": "node tests/chrome-fill-background.mjs && node tests/chrome-action-correctness.mjs && node tests/chrome-transport-reliability.mjs && node tests/chatgpt-handoff-diagnostics.mjs && node tests/chrome-background.mjs",
+     "test:browser-keyboard": "node tests/chrome-keyboard-real-browser.mjs",
+     "test:browser-images": "node tests/chrome-image-file-real-browser.mjs",
+     "test:browser-paste": "node tests/chrome-paste-real-browser.mjs",
+-    "test:browser-video": "node tests/chrome-video-file-prepare.mjs && node tests/chrome-video-upload.mjs && node tests/chrome-video-file-input.mjs && node tests/chrome-open-shadow.mjs && node tests/chrome-snapshot-media-diagnostics.mjs"
++    "test:browser-video": "node tests/chrome-video-file-prepare.mjs && node tests/chrome-video-upload.mjs && node tests/chrome-video-file-input.mjs && node tests/chrome-open-shadow.mjs && node tests/chrome-snapshot-media-diagnostics.mjs",
++    "test:browser-csv": "node tests/chrome-csv-file-input.mjs"
+   },
+   "engines": {
+     "node": ">=18"
+   },
+   "license": "MIT",
+-  "author": "Alexander R\u00e5dahl Benz",
++  "author": "Alexander Rådahl Benz",
+   "repository": {
+     "type": "git",
+     "url": "https://github.com/alexanderradahl/mac-developer-bridge.git"
