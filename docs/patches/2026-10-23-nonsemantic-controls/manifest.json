@@ -1,0 +1,35 @@
+{
+  "base": "installed-source-overlay",
+  "release": "browser-nonsemantic-controls-20261023.2",
+  "extensionVersion": "0.2.23",
+  "files": {
+    "bridge.mjs": {
+      "beforeSha256": "0e261e0e8e33da72c62e81342a262a7bd28d4e68de206c108a5c365d69a854a0",
+      "afterSha256": "aad2a2091dad1cc7b4b4b2a9f4b8eefa1645310e4a8774e571cb9793e09a839a"
+    },
+    "chrome-extension/service-worker.js": {
+      "beforeSha256": "9229c3609b84d4023e5b56ed606ea3edd7cbbaf6ea5d7db777aabbc220d166e5",
+      "afterSha256": "be42e84fdb6709f83084b8386869d1762b2dc0c062d0bce68d6ef34e3b7f65a1"
+    },
+    "chrome-extension/manifest.json": {
+      "beforeSha256": "9ef27298afefa3117094c73f63ca3e50e0cf0a130a1c6458c26bfd62481bee3c",
+      "afterSha256": "a07ac41c1caf4a2b9fcae6d57ffe43d97bf668b083dfc8b22d9e8b0da1c0e7e2"
+    },
+    "tests/chrome-workspace-capacity.mjs": {
+      "beforeSha256": "876d13a63410783fa488e6968d829615eb5b69b03f588730337f19ae8ee463d3",
+      "afterSha256": "6a0249040e5cf5641b0483f823c169e6a3ca03f9950fa912498cd8cc40359bc8"
+    },
+    "tests/chrome-background.mjs": {
+      "beforeSha256": "a956fb2c54b99153abc18bc4b6fdbbbae4ff8a259a2404dd47dc4b8fda358428",
+      "afterSha256": "bdfedc208be0d6790c39b50c12f00ad4802948699838913af18d9d7c6d3fa34d"
+    },
+    "tests/chrome-snapshot-media-diagnostics.mjs": {
+      "beforeSha256": "8d52fe3ebbfe5c5519bddfe49e2d5646827136965ab7284c9b5a9c99cce50908",
+      "afterSha256": "b1382c0850526c5b1c3baa1c83944a99e8ba36dac5fe8d5ed3df1e783e20345e"
+    },
+    "tests/chrome-video-file-input.mjs": {
+      "beforeSha256": "dc6189eaff09d34064402ae367e7ff45d653d627fe272ca731b6f463d3567c9e",
+      "afterSha256": "d5317344f4fb293bd70715e9a0f387690fc9002661f36b8a131528713af7b4f8"
+    }
+  }
+}

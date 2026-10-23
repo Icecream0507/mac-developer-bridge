@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-23",
+  "extensionVersion": "0.2.23",
+  "extensionBuild": "browser-nonsemantic-controls-20261023.2",
+  "test": "Authenticated workflow editor; open existing draft trigger settings",
+  "exactLabelLookup": "When customer visits a page",
+  "labelMatchCount": 1,
+  "labelTag": "h2",
+  "discoveryHints": [
+    "cursor-pointer",
+    "rendered-text-match"
+  ],
+  "labelSearchTruncated": false,
+  "panelOpenedAndReadBack": true,
+  "panelLabelsObserved": [
+    "When to send",
+    "Add event or date rule",
+    "Where to send",
+    "Add page rule",
+    "Audience",
+    "Scheduling",
+    "Goal"
+  ],
+  "draftStillUnpublished": true,
+  "customerMessagesSent": false,
+  "liveWorkflowChanged": false,
+  "permissionsChanged": false,
+  "chromeRestarted": false,
+  "sharedHTTPFrontendRestarted": false,
+  "publicMCPStdioUsedForFreshSchema": true,
+  "ruleMenuOpenedAndReadBack": true,
+  "additionalControlsObserved": [
+    "Add page rule",
+    "Add event or date rule",
+    "Add a time on page rule"
+  ],
+  "hrefLessAnchorsSupported": true,
+  "triggerReopenedOnFinalBuild": true,
+  "draftSaveStillDisabled": true,
+  "finalWorkerSha256": "be42e84fdb6709f83084b8386869d1762b2dc0c062d0bce68d6ef34e3b7f65a1"
+}

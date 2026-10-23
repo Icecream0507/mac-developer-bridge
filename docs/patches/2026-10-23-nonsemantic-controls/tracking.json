@@ -1,0 +1,9 @@
+{
+  "task": "Support nonsemantic workflow-editor controls",
+  "status": "completed",
+  "implementationInstalled": true,
+  "authenticatedAcceptancePassed": true,
+  "originalChatTask": "Timed popup and earlier contact capture still pending; existing workflow unchanged",
+  "issueTracking": "This checkout has no initialized beads database; repair tracked in this release archive",
+  "publication": "Isolated source-overlay archive; no unrelated local edits committed"
+}

@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-23",
+  "productionSourceMatchesTestedCandidate": true,
+  "installedExtensionVersion": "0.2.23",
+  "installedExtensionBuild": "browser-nonsemantic-controls-20261023.2",
+  "npmRunCheck": {
+    "exitCode": 0,
+    "logSha256": "a121af83741c93297976b933a090662fc669368f6381a6f16db6c1f2613631f5"
+  },
+  "npmTest": {
+    "exitCode": 0,
+    "logSha256": "5a8f5e873b60fbf089b14411ad68d0ee9d1aa3bfadc16e522a4b2d20e77f5232"
+  },
+  "targetedBrowserCases": {
+    "passed": 14,
+    "failed": 0
+  },
+  "layoutCases": {
+    "passed": 12,
+    "failed": 0
+  },
+  "openShadowCases": {
+    "passed": 16,
+    "failed": 0
+  },
+  "mediaChecks": "chrome-snapshot-media-diagnostics: bounds, privacy, and passive-read checks passed",
+  "publicArgumentGuards": {
+    "rejectedMalformedInputs": 4
+  },
+  "manifestPermissionChanges": false,
+  "releaseIdentityAssertionsUpdated": true,
+  "liveWorkflowPublished": false
+}

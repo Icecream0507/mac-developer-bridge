@@ -1,0 +1,55 @@
+{
+  "passed": 12,
+  "total": 12,
+  "baselineCompared": false,
+  "results": [
+    {
+      "name": "opt-in-only-and-default-payload-compatible-with-captured-baseline",
+      "passed": true
+    },
+    {
+      "name": "noninteractive-graph-presence-is-independent-of-control-filter",
+      "passed": true
+    },
+    {
+      "name": "zero-size-hidden-transparent-content-hidden-and-offscreen-remain-distinct",
+      "passed": true
+    },
+    {
+      "name": "samples-and-measurement-reads-are-capped-while-counts-remain-exact",
+      "passed": true
+    },
+    {
+      "name": "root-ancestor-chain-stops-after-eight-and-includes-zero-size-container",
+      "passed": true
+    },
+    {
+      "name": "existing-open-root-scope-excludes-closed-root-and-frame-content",
+      "passed": true
+    },
+    {
+      "name": "layout-does-not-read-text-html-labels-framework-state-or-dispatch-events",
+      "passed": true
+    },
+    {
+      "name": "invalid-or-extreme-numbers-and-unrecognized-css-never-cross-output",
+      "passed": true
+    },
+    {
+      "name": "detached-nodes-and-measurement-errors-are-safe-and-bounded",
+      "passed": true
+    },
+    {
+      "name": "existing-twenty-thousand-node-budget-yields-lower-bound-counts",
+      "passed": true
+    },
+    {
+      "name": "bridge-option-is-strict-and-default-wire-arguments-remain-unchanged",
+      "passed": true
+    },
+    {
+      "name": "worker-still-requires-approved-tab-isolated-world-deadline-and-document-binding",
+      "passed": true
+    }
+  ]
+}

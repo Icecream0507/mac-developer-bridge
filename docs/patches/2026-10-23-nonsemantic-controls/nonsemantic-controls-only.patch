@@ -1,0 +1,229 @@
+--- a/bridge.mjs
++++ b/bridge.mjs
+@@ -978,6 +978,8 @@
+         max_text_chars: { type: "integer", minimum: 1000, maximum: 200000, default: 50000 },
+         max_elements: { type: "integer", minimum: 1, maximum: 500, default: 200 },
+         include_layout: { type: "boolean", default: false, description: "Opt in to bounded DOM geometry/style counts for ReactFlow containers/nodes and SVG/canvas/frame presence. No additional text, HTML, frame content or app state is read." },
++        include_nonsemantic: { type: "boolean", default: false, description: "Include bounded, visible div/span/card targets inferred from cursor:pointer or an inline click attribute. Inference does not prove activation. No handler source or framework state is read. Use returned selectors with chrome_click, then verify the page." },
++        text_query: { type: "string", minLength: 1, maxLength: 500, description: "Find exact visible rendered text, ignoring case and collapsing whitespace. Includes nonsemantic labels and returns their observed selectors. No regex or script evaluation. Multiple matches remain explicit; never assume the first is the intended target." },
+       },
+       required: ["tab_id"],
+       additionalProperties: false,
+@@ -3882,8 +3884,14 @@
+       const maxTextChars = optionalInteger(args, "max_text_chars", 50_000, 1_000, 200_000);
+       const maxElements = optionalInteger(args, "max_elements", 200, 1, 500);
+       const includeLayout = optionalBoolean(args, "include_layout", false);
++      const includeNonsemantic = optionalBoolean(args, "include_nonsemantic", false);
++      const textQuery = args.text_query === undefined ? undefined : requireString(args, "text_query");
++      if (textQuery !== undefined && (!textQuery.trim() || textQuery.length > 500))
++        throw new Error("'text_query' must contain 1 to 500 characters, not only whitespace");
+       return await callBackgroundChrome(name, "tabs.snapshot", { tabId, maxTextChars, maxElements,
+         ...(includeLayout ? { includeLayout: true } : {}),
++        ...(includeNonsemantic ? { includeNonsemantic: true } : {}),
++        ...(textQuery !== undefined ? { textQuery } : {}),
+       });
+     }
+ 
+--- a/chrome-extension/service-worker.js
++++ b/chrome-extension/service-worker.js
+@@ -1,7 +1,7 @@
+ const NATIVE_HOST = "io.github.alexanderradahl.mac_developer_bridge";
+-const VERSION = "0.2.22";
++const VERSION = "0.2.23";
+ // Immutable identity of the executing release, sent on every native handshake.
+-const LOADED_EXTENSION_BUILD_ID = "browser-layout-snapshot-20261012.1";
++const LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023.2";
+ const NATIVE_INSTANCE_ID = crypto.randomUUID();
+ const NATIVE_OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
+ const MAX_NATIVE_OPERATIONS = 5_000;
+@@ -3495,9 +3495,81 @@
+   }
+   const combinedText = textParts.join("\n");
+   const bodyText = combinedText.slice(0, maxTextChars);
+-  const candidates = observedElements.filter(element => element.matches(
++  let candidates = observedElements.filter(element => element.matches(
+     'a[href],button,input,textarea,select,[draggable="true"],[contenteditable]:not([contenteditable="false"]),summary,[role=button],[role=link],[role=textbox],[role=searchbox],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=combobox],[role=listbox],[role=menu],[role=menuitem],[role=menuitemradio],[role=menuitemcheckbox],[role=option],[role=slider],[role=spinbutton],[role=treeitem],[tabindex]:not([tabindex="-1"])',
+   ));
++  // Opt-in, passive discovery for clickable div/span cards that lack native or
++  // ARIA semantics. CSS/attributes are hints, never proof of a click handler.
++  // No framework properties, handler source, page scripts or frames are read.
++  const discoveredTargets = new Map();
++  let nonsemanticDiscovery = null;
++  const normalizeLabel = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
++  const textQuery = typeof options.textQuery === "string" && options.textQuery.length <= 500
++    ? normalizeLabel(options.textQuery) : "";
++  if (options.includeNonsemantic === true || textQuery) {
++    const semanticTargets = new Set(candidates);
++    const styles = new Map(), labels = new Map();
++    const styleOf = element => {
++      if (!styles.has(element)) styles.set(element, getComputedStyle(element));
++      return styles.get(element);
++    };
++    // innerText only: textContent can expose hidden descendants on custom cards.
++    const labelOf = element => {
++      if (!labels.has(element)) labels.set(element, String(element.innerText || "").trim());
++      return labels.get(element);
++    };
++    const visibleTarget = element => {
++      const box = element.getBoundingClientRect();
++      if (!element.isConnected || !Number.isFinite(box.width) || !Number.isFinite(box.height)
++          || box.width <= 0 || box.height <= 0 || styleOf(element).pointerEvents === "none") return false;
++      let current = element;
++      for (let depth = 0; current && depth < 64; depth++, current = parentAcrossOpenRoot(current)) {
++        const css = styleOf(current);
++        if (css.display === "none" || ["hidden", "collapse"].includes(css.visibility)
++            || css.opacity === "0" || css.contentVisibility === "hidden"
++            || current.hasAttribute("hidden") || current.hasAttribute("inert")
++            || current.getAttribute("aria-hidden") === "true"
++            || current.getAttribute("aria-disabled") === "true") return false;
++      }
++      return !current; // Do not infer visibility beyond the bounded ancestor walk.
++    };
++    const extraTargets = [], scanLimit = 5000, extraLimit = Math.min(200, maxElements);
++    let inspectedElements = 0, truncated = false;
++    for (const element of observedElements) {
++      if (++inspectedElements > scanLimit) { inspectedElements = scanLimit; truncated = true; break; }
++      if (!(element instanceof HTMLElement) || semanticTargets.has(element)
++          || ["HTML", "BODY", "HEAD", "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "TITLE", "META", "LINK",
++            "INPUT", "TEXTAREA", "SELECT", "OPTION", "IFRAME", "CANVAS", "VIDEO", "AUDIO"].includes(element.tagName)) continue;
++      const css = styleOf(element), hints = [];
++      if (css.cursor === "pointer") hints.push("cursor-pointer");
++      if (element.hasAttribute("onclick")) hints.push("inline-click-attribute");
++      if (!textQuery && hints.length === 0) continue;
++      if (!visibleTarget(element)) continue;
++      // Avoid duplicate labels inside already usable native/ARIA controls.
++      let parent = parentAcrossOpenRoot(element), underSemanticControl = false;
++      for (let depth = 0; parent && depth < 64; depth++, parent = parentAcrossOpenRoot(parent)) {
++        if (semanticTargets.has(parent)) { underSemanticControl = true; break; }
++      }
++      if (underSemanticControl) continue;
++      const label = labelOf(element), normalized = normalizeLabel(label);
++      if (!normalized || label.length > 2000 || (textQuery && normalized !== textQuery)) continue;
++      // Prefer the innermost rendered label over repeated wrappers. A click on
++      // that observed label bubbles normally to delegated Ember/React handlers.
++      const repeatedWrapper = [...element.children].some(child => child instanceof HTMLElement
++        && visibleTarget(child) && normalizeLabel(labelOf(child)) === normalized);
++      if (repeatedWrapper && !element.hasAttribute("onclick")) continue;
++      if (extraTargets.length >= extraLimit) { truncated = true; break; }
++      if (textQuery) hints.push("rendered-text-match");
++      extraTargets.push(element);
++      discoveredTargets.set(element, { discovery: "nonsemantic", interactionHints: hints,
++        inferredInteractive: hints.some(hint => hint !== "rendered-text-match") });
++    }
++    candidates = [...candidates, ...extraTargets];
++    if (textQuery) candidates = candidates.filter(element => visibleTarget(element)
++      && normalizeLabel(labelOf(element)) === textQuery);
++    nonsemanticDiscovery = { mode: textQuery ? "exact-rendered-text" : "interaction-hints",
++      inspectedElements, scanLimit, extraLimit, truncated: truncated || openShadowTraversalTruncated };
++  }
+   const elements = [];
+   for (const element of candidates) {
+     if (elements.length >= maxElements) break;
+@@ -3512,11 +3584,12 @@
+     }
+     elements.push({
+       selector: selectorFor(element),
++      ...(discoveredTargets.get(element) || {}),
+       ...editableDetails(element),
+       tag: element.tagName.toLowerCase(),
+       type,
+       role: element.getAttribute("role"),
+-      text: String(element.innerText || element.textContent || "").trim().slice(0, 500),
++      text: String(element.innerText || (discoveredTargets.has(element) ? "" : element.textContent) || "").trim().slice(0, 500),
+       ariaLabel: element.getAttribute("aria-label"),
+       ariaExpanded: element.getAttribute("aria-expanded"),
+       ariaHasPopup: element.getAttribute("aria-haspopup"),
+@@ -3798,7 +3871,9 @@
+       ariaLabel: activeElement.getAttribute("aria-label"),
+     } : null,
+     elements,
+-    elementsTruncated: candidates.length > maxElements || openShadowTraversalTruncated,
++    elementsTruncated: candidates.length > maxElements || openShadowTraversalTruncated
++      || nonsemanticDiscovery?.truncated === true,
++    ...(nonsemanticDiscovery ? { nonsemanticDiscovery } : {}),
+     fileInputs,
+     fileInputsTruncated: fileCandidates.length > fileLimit || openShadowTraversalTruncated,
+     images,
+@@ -6385,8 +6460,17 @@
+       const tab = await getApprovedTab(args.tabId, compiled);
+       const maxTextChars = Math.max(1_000, Math.min(200_000, Number(args.maxTextChars || 50_000)));
+       const maxElements = Math.max(1, Math.min(500, Number(args.maxElements || 200)));
++      if (args.textQuery !== undefined && (typeof args.textQuery !== "string"
++          || !args.textQuery.trim() || args.textQuery.length > 500)) {
++        throw new Error("Snapshot text query must be a nonempty string of at most 500 characters.");
++      }
++      const snapshotOptions = {
++        ...(args.includeLayout === true ? { includeLayout: true } : {}),
++        ...(args.includeNonsemantic === true ? { includeNonsemantic: true } : {}),
++        ...(args.textQuery !== undefined ? { textQuery: args.textQuery } : {}),
++      };
+       return await executeInTab(tab.id, pageSnapshot, [maxTextChars, maxElements,
+-        ...(args.includeLayout === true ? [{ includeLayout: true }] : []),
++        ...(Object.keys(snapshotOptions).length ? [snapshotOptions] : []),
+       ], "ISOLATED", { deadlineMs: message.deadlineMs, includeDocumentIdentity: true });
+     }
+ 
+--- a/chrome-extension/manifest.json
++++ b/chrome-extension/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "manifest_version": 3,
+   "name": "Mac Developer Bridge Background Browser",
+-  "version": "0.2.22",
++  "version": "0.2.23",
+   "description": "Lets Mac Developer Bridge operate approved Chrome tabs without bringing Chrome to the foreground.",
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq9QjCNUI8xWx8wNSCITv4TFRy2pYhd77cDUTmYFJqduaYwhplrkvbo1BB9wTn7VBKLe8ohNp4fnZz9T03il69oRPsYGRb5aHAdSVaYdCrOiGs7GN00wvwUf6d2lQeuslDd53SpTnXZdtGRMVRBeK4X4NyEksQHzxKpaeaRlT0R9qREp+TdiLfEh5Z6UImZ0ZeBVn7efazrNBYMARBjas3A/AbXUyH654TVMOAqePUpgj129g8ZGQjcPqOFKGqhAyyCVhpbJBU+1Kt7sX6wbIIREtjmryW7sqMba7TnubqCv2qTPLZNeHQVQaQpl75cYdL26lh8PXwSTHeQKX+3KwHwIDAQAB",
+   "permissions": [
+--- a/tests/chrome-workspace-capacity.mjs
++++ b/tests/chrome-workspace-capacity.mjs
+@@ -9,7 +9,7 @@
+ const manifest = JSON.parse(await fs.readFile(path.join(root, "chrome-extension", "manifest.json"), "utf8"));
+ const workerVersion = workerSource.match(/const VERSION = "([^"]+)";/)?.[1];
+ assert.equal(workerVersion, manifest.version, "service worker and manifest versions should match");
+-assert.equal(workerVersion, "0.2.20");
++assert.equal(workerVersion, "0.2.23");
+ const helperMatch = workerSource.match(
+   /function normalizeWorkspacePoolSize[\s\S]*?\n}\n\n(?=function errorPayload)/,
+ );
+--- a/tests/chrome-background.mjs
++++ b/tests/chrome-background.mjs
+@@ -219,15 +219,15 @@
+   assert.ok(manifest.permissions.includes("tabGroups"));
+   assert.ok(manifest.permissions.includes("storage"));
+   assert.ok(manifest.icons?.["16"] && manifest.icons?.["128"]);
+-  assert.equal(manifest.version, "0.2.22");
++  assert.equal(manifest.version, "0.2.23");
+   assert.equal(manifest.permissions.includes("debugger"), false, "realistic click support must not require Chrome debugger permission");
+   await Promise.all([16, 32, 48, 128].map(async (size) => {
+     const stat = await fs.stat(path.join(root, "chrome-extension", "icons", `icon-${size}.png`));
+     assert.ok(stat.size > 0, `expected non-empty ${size}px extension icon`);
+   }));
+   const workerSource = await fs.readFile(path.join(root, "chrome-extension", "service-worker.js"), "utf8");
+-  assert.match(workerSource, /const VERSION = "0\.2\.22"/);
+-  assert.match(workerSource, /LOADED_EXTENSION_BUILD_ID = "browser-layout-snapshot-20261012\.1"/);
++  assert.match(workerSource, /const VERSION = "0\.2\.23"/);
++  assert.match(workerSource, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.2"/);
+   assert.match(workerSource, /WORKSPACE_GROUP_TITLE = "MDB"/);
+   assert.match(workerSource, /chrome\.tabs\.group/);
+   assert.match(workerSource, /chrome\.tabGroups\.query/);
+--- a/tests/chrome-snapshot-media-diagnostics.mjs
++++ b/tests/chrome-snapshot-media-diagnostics.mjs
+@@ -307,6 +307,6 @@
+ assert.match(source, /roots\.length >= 512/);
+ assert.match(source, /entry\.depth >= 16/);
+ assert.match(source, /observedElements\.length >= 20000/);
+-assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-layout-snapshot-20261012\.1"/);
++assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.2"/);
+ 
+ console.log("chrome-snapshot-media-diagnostics: bounds, privacy, and passive-read checks passed");
+--- a/tests/chrome-video-file-input.mjs
++++ b/tests/chrome-video-file-input.mjs
+@@ -345,7 +345,7 @@
+ assert.match(source, /activeVideoTransferCount >= MAX_ACTIVE_VIDEO_FILE_TRANSFERS/);
+ assert.match(source, /extensionReloadReserved = true;/);
+ assert.match(source, /countActiveVideoFileTransfers\(\)/);
+-assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-video-file-upload-20261011\.4"/);
++assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.2"/);
+ assert.match(source, /selector.length > 10000/);
+ for (const phase of ["Begin", "Chunk", "Commit", "Abort"]) {
+   assert.ok(source.includes('case "tabs.videoFile' + phase + '":'));

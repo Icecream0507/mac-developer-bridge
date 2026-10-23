@@ -1,0 +1,71 @@
+{
+  "passed": 16,
+  "total": 16,
+  "results": [
+    {
+      "name": "snapshot-discovers-open-nested-controls-and-keeps-light-css-selectors",
+      "passed": true
+    },
+    {
+      "name": "snapshot-generates-unique-sibling-paths-and-root-local-ids",
+      "passed": true
+    },
+    {
+      "name": "closed-roots-and-frame-documents-are-never-discovered-or-targeted",
+      "passed": true
+    },
+    {
+      "name": "fill-resolves-deep-focus-and-preserves-one-edit-with-no-submit",
+      "passed": true
+    },
+    {
+      "name": "click-supports-shadow-controls-with-one-activation-and-deep-focus",
+      "passed": true
+    },
+    {
+      "name": "literal-delimiters-in-css-attributes-remain-normal-selectors",
+      "passed": true
+    },
+    {
+      "name": "shadow-selector-ambiguity-empty-segments-and-depth-fail-before-actions",
+      "passed": true
+    },
+    {
+      "name": "shadow-file-picker-and-disabled-readonly-deadline-controls-stay-enforced",
+      "passed": true
+    },
+    {
+      "name": "shadow-replacement-during-edit-or-pointer-dispatch-stops-without-replay",
+      "passed": true
+    },
+    {
+      "name": "shadow-video-transfer-retains-document-binding-and-one-file-assignment",
+      "passed": true
+    },
+    {
+      "name": "shadow-video-stale-input-host-or-document-never-selects-a-replacement",
+      "passed": true
+    },
+    {
+      "name": "passive-video-readback-includes-readiness-and-strips-url-secrets-and-bytes",
+      "passed": true
+    },
+    {
+      "name": "snapshot-root-depth-and-node-budgets-stop-with-explicit-truncation",
+      "passed": true
+    },
+    {
+      "name": "ordinary-css-click-and-visible-fill-selection-retain-existing-behavior",
+      "passed": true
+    },
+    {
+      "name": "concurrent-video-admission-never-exceeds-two-and-recovers-after-limit",
+      "passed": true
+    },
+    {
+      "name": "failed-admission-does-not-poison-queue-or-reserve-capacity",
+      "passed": true
+    }
+  ],
+  "environment": "source-only-dom-and-storage-fixtures"
+}

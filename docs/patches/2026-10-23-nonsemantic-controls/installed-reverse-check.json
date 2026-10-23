@@ -1,0 +1,10 @@
+{
+  "verified": true,
+  "targetState": "candidate",
+  "filesChecked": 7,
+  "overlayAppliedInTemporaryCopy": true,
+  "candidateHashesMatched": true,
+  "syntaxChecksPassed": true,
+  "targetUnchanged": true,
+  "temporaryCopyRemoved": true
+}

@@ -1,0 +1,18 @@
+[
+  {
+    "rejected": true,
+    "reason": "{\"error\": \"'include_nonsemantic' must be a boolean\"}"
+  },
+  {
+    "rejected": true,
+    "reason": "{\"error\": \"'text_query' must contain 1 to 500 characters, not only whitespace\"}"
+  },
+  {
+    "rejected": true,
+    "reason": "{\"error\": \"'text_query' must contain 1 to 500 characters, not only whitespace\"}"
+  },
+  {
+    "rejected": true,
+    "reason": "{\"error\": \"'text_query' must be a non-empty string\"}"
+  }
+]
