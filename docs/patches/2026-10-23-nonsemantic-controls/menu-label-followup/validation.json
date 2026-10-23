@@ -1,0 +1,15 @@
+{
+  "browserCasesPassed": 15,
+  "browserCasesFailed": 0,
+  "syntaxChecksPassed": true,
+  "backgroundChromeSuitePassed": true,
+  "mediaDiagnosticsPassed": true,
+  "videoInput11CasesPassed": true,
+  "openShadowSuitePassed": true,
+  "layoutSuitePassed": true,
+  "fullSuiteRerunForThisFollowup": false,
+  "patchAppliedToExactBackupAndHashesVerified": true,
+  "authenticatedAcceptance": "Inner time-rule menu link discovered and clicked successfully; time field set and saved; workflow subsequently published",
+  "permissionsChanged": false,
+  "privateAppDataIncludedInArchive": false
+}

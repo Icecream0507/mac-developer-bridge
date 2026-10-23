@@ -1,0 +1,27 @@
+{
+  "baseBuild": "browser-nonsemantic-controls-20261023.2",
+  "candidateBuild": "browser-nonsemantic-controls-20261023.3",
+  "extensionVersion": "0.2.23",
+  "files": {
+    "chrome-extension/service-worker.js": {
+      "beforeSha256": "be42e84fdb6709f83084b8386869d1762b2dc0c062d0bce68d6ef34e3b7f65a1",
+      "afterSha256": "9229f212bf93c8e8c3f8ccc53c211dc08838f5026220245acece8ecb2067dee8"
+    },
+    "tests/chrome-nonsemantic-controls.mjs": {
+      "beforeSha256": "3e41e00a1de3f69630ca7801abd2d38f26a8660fbfe7c9a774be55b39c9654e7",
+      "afterSha256": "59494ea902204e757ecd14a0441d1fe49dd0da7962832affe36531cab8df883d"
+    },
+    "tests/chrome-background.mjs": {
+      "beforeSha256": "bdfedc208be0d6790c39b50c12f00ad4802948699838913af18d9d7c6d3fa34d",
+      "afterSha256": "c2a1a09fe298ce70fe94baaa7262c3fb618da4293bab23ff33545c39b179eb4c"
+    },
+    "tests/chrome-snapshot-media-diagnostics.mjs": {
+      "beforeSha256": "b1382c0850526c5b1c3baa1c83944a99e8ba36dac5fe8d5ed3df1e783e20345e",
+      "afterSha256": "15067647747619de0320e9afe3d305f321b485ae017656bdb0e575defcab7306"
+    },
+    "tests/chrome-video-file-input.mjs": {
+      "beforeSha256": "d5317344f4fb293bd70715e9a0f387690fc9002661f36b8a131528713af7b4f8",
+      "afterSha256": "9d7d92125365323156d6fd0d5be321b1dfa329471f5470899f955d93f17c2e4a"
+    }
+  }
+}

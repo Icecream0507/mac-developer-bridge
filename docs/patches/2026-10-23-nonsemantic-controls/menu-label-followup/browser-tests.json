@@ -1,0 +1,70 @@
+{
+  "workerSha256": "9229f212bf93c8e8c3f8ccc53c211dc08838f5026220245acece8ecb2067dee8",
+  "browserVersion": "141.0.7390.37",
+  "environment": "disposable-headless-profile-owned-in-memory-html-no-external-network",
+  "profileRemoved": true,
+  "passed": 15,
+  "failed": 0,
+  "results": [
+    {
+      "name": "opt-in-default-stays-byte-compatible-with-baseline",
+      "passed": true
+    },
+    {
+      "name": "discovers-pointer-card-and-delegated-click-opens-panel-once",
+      "passed": true
+    },
+    {
+      "name": "href-less-anchor-and-custom-html-control-discovery",
+      "passed": true
+    },
+    {
+      "name": "menu-wrappers-retain-the-inner-interactive-label",
+      "passed": true
+    },
+    {
+      "name": "text-query-finds-nonsemantic-label-without-pointer-or-role",
+      "passed": true
+    },
+    {
+      "name": "ambiguous-identical-labels-remain-separate-observed-targets",
+      "passed": true
+    },
+    {
+      "name": "native-controls-preferred-over-their-child-labels",
+      "passed": true
+    },
+    {
+      "name": "hidden-transparent-inert-and-disabled-ancestors-excluded",
+      "passed": true
+    },
+    {
+      "name": "open-shadow-label-resolves-and-clicks",
+      "passed": true
+    },
+    {
+      "name": "closed-shadow-and-frame-content-not-traversed",
+      "passed": true
+    },
+    {
+      "name": "no-handler-source-framework-property-or-password-leak",
+      "passed": true
+    },
+    {
+      "name": "snapshot-is-passive-with-no-events-focus-or-mutation",
+      "passed": true
+    },
+    {
+      "name": "extra-target-count-and-total-results-are-bounded",
+      "passed": true
+    },
+    {
+      "name": "scan-limit-is-reported-instead-of-a-false-complete-search",
+      "passed": true
+    },
+    {
+      "name": "hidden-descendant-text-is-not-used-as-a-target-label",
+      "passed": true
+    }
+  ]
+}

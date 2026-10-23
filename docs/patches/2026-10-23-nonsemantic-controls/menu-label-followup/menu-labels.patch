@@ -1,0 +1,74 @@
+--- a/chrome-extension/service-worker.js
++++ b/chrome-extension/service-worker.js
+@@ -1,7 +1,7 @@
+ const NATIVE_HOST = "io.github.alexanderradahl.mac_developer_bridge";
+ const VERSION = "0.2.23";
+ // Immutable identity of the executing release, sent on every native handshake.
+-const LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023.2";
++const LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023.3";
+ const NATIVE_INSTANCE_ID = crypto.randomUUID();
+ const NATIVE_OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000;
+ const MAX_NATIVE_OPERATIONS = 5_000;
+@@ -3548,7 +3548,12 @@
+       // Avoid duplicate labels inside already usable native/ARIA controls.
+       let parent = parentAcrossOpenRoot(element), underSemanticControl = false;
+       for (let depth = 0; parent && depth < 64; depth++, parent = parentAcrossOpenRoot(parent)) {
+-        if (semanticTargets.has(parent)) { underSemanticControl = true; break; }
++        // Menus often put an interactive label inside a semantic wrapper. Keep
++        // those observed labels available; native controls still take priority.
++        if (semanticTargets.has(parent)
++            && !["menu", "menuitem", "listbox", "option"].includes(parent.getAttribute("role"))) {
++          underSemanticControl = true; break;
++        }
+       }
+       if (underSemanticControl) continue;
+       const label = labelOf(element), normalized = normalizeLabel(label);
+--- a/tests/chrome-nonsemantic-controls.mjs
++++ b/tests/chrome-nonsemantic-controls.mjs
+@@ -74,6 +74,14 @@
+     assert.ok(selectors(result).includes('#rule')); assert.ok(selectors(result).includes('#custom'));
+     assert.deepEqual(selectors(await snap({ textQuery: 'Add page rule' })), ['#rule']);
+   });
++  await scenario('menu-wrappers-retain-the-inner-interactive-label', '<div role="menu"><div id="wrapper" role="menuitem"><span id="inner" style="cursor:pointer">Add a time rule</span></div></div>', async (page, snap) => {
++    const result = await snap({ textQuery: 'Add a time rule' });
++    assert.ok(selectors(result).includes('#inner'));
++    await page.evaluate(() => { document.querySelector('#inner').addEventListener('click', () => { document.body.dataset.menuActivated = 'yes'; }); });
++    const r = await page.evaluate(() => window.mdbFixture.pageClick('#inner', {}));
++    assert.equal(r.clicked, true);
++    assert.equal(await page.evaluate(() => document.body.dataset.menuActivated), 'yes');
++  });
+   await scenario('text-query-finds-nonsemantic-label-without-pointer-or-role', '<div><div><span id="label">When customer\n visits a page</span></div></div><p>Different setting</p>', async (page, snap) => {
+     const result = await snap({ textQuery: '  WHEN CUSTOMER visits A PAGE ' });
+     assert.equal(result.elements.length, 1); assert.equal(result.elements[0].selector, '#label');
+--- a/tests/chrome-background.mjs
++++ b/tests/chrome-background.mjs
+@@ -227,7 +227,7 @@
+   }));
+   const workerSource = await fs.readFile(path.join(root, "chrome-extension", "service-worker.js"), "utf8");
+   assert.match(workerSource, /const VERSION = "0\.2\.23"/);
+-  assert.match(workerSource, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.2"/);
++  assert.match(workerSource, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.3"/);
+   assert.match(workerSource, /WORKSPACE_GROUP_TITLE = "MDB"/);
+   assert.match(workerSource, /chrome\.tabs\.group/);
+   assert.match(workerSource, /chrome\.tabGroups\.query/);
+--- a/tests/chrome-snapshot-media-diagnostics.mjs
++++ b/tests/chrome-snapshot-media-diagnostics.mjs
+@@ -307,6 +307,6 @@
+ assert.match(source, /roots\.length >= 512/);
+ assert.match(source, /entry\.depth >= 16/);
+ assert.match(source, /observedElements\.length >= 20000/);
+-assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.2"/);
++assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.3"/);
+ 
+ console.log("chrome-snapshot-media-diagnostics: bounds, privacy, and passive-read checks passed");
+--- a/tests/chrome-video-file-input.mjs
++++ b/tests/chrome-video-file-input.mjs
+@@ -345,7 +345,7 @@
+ assert.match(source, /activeVideoTransferCount >= MAX_ACTIVE_VIDEO_FILE_TRANSFERS/);
+ assert.match(source, /extensionReloadReserved = true;/);
+ assert.match(source, /countActiveVideoFileTransfers\(\)/);
+-assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.2"/);
++assert.match(source, /LOADED_EXTENSION_BUILD_ID = "browser-nonsemantic-controls-20261023\.3"/);
+ assert.match(source, /selector.length > 10000/);
+ for (const phase of ["Begin", "Chunk", "Commit", "Abort"]) {
+   assert.ok(source.includes('case "tabs.videoFile' + phase + '":'));
