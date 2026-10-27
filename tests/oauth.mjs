@@ -537,13 +537,39 @@ try {
     assert.ok(!d.grant_types_supported.includes("implicit"), "the implicit grant is forbidden by OAuth 2.1");
     assert.ok(d.token_endpoint_auth_methods_supported.includes("none"), `${pathname} must allow a public client`);
     assert.equal(d.authorization_response_iss_parameter_supported, true, `${pathname} iss support`);
-    // Advertising either of these routes ChatGPT into DCR or CIMD, neither of
-    // which this server implements; its dialog reported both as unavailable.
-    assert.equal(d.registration_endpoint, undefined, `${pathname} must not advertise dynamic client registration`);
+    assert.equal(d.registration_endpoint, `${ORIGIN}/register`, `${pathname} registration_endpoint`);
     assert.equal(d.client_id_metadata_document_supported, undefined, `${pathname} must not advertise CIMD`);
     assert.ok(!r.text.includes(TOKEN) && !r.text.includes(CLIENT_SECRET), "a discovery document leaked a credential");
   }
-  ok("all five authorization-server documents share one issuer and advertise no registration/CIMD hints");
+  ok("all five authorization-server documents share one issuer and advertise registration without CIMD");
+
+  const registration = await req(main, "/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Apps SDK test client",
+      redirect_uris: [REDIRECT, REDIRECT_ALT],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      scope: "mcp",
+    }),
+  });
+  assert.equal(registration.status, 201);
+  assert.equal(registration.json.client_id, CLIENT_ID);
+  assert.deepEqual(registration.json.redirect_uris, [REDIRECT, REDIRECT_ALT]);
+  assert.equal(registration.json.token_endpoint_auth_method, "none");
+  assert.ok(!registration.text.includes(TOKEN) && !registration.text.includes(CLIENT_SECRET), "registration leaked a credential");
+  ok("dynamic registration returns the stable public client and validated callbacks");
+
+  const badRegistration = await req(main, "/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ redirect_uris: ["https://evil.example/callback"] }),
+  });
+  assert.equal(badRegistration.status, 400);
+  assert.equal(badRegistration.json.error, "invalid_redirect_uri");
+  ok("dynamic registration rejects untrusted callback URLs");
 
   const optionsPrm = await req(main, "/.well-known/oauth-protected-resource", { method: "OPTIONS" });
   assert.equal(optionsPrm.status, 204);

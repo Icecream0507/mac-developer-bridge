@@ -387,7 +387,7 @@ Fill in the dialog as follows:
 | Connection | Server URL |
 | Server URL | `https://<hostname>/mcp` |
 | Authentication | OAuth |
-| Registration method | User-Defined OAuth Client |
+| Registration method | Dynamic registration (`<hostname>/register`) or User-Defined OAuth Client |
 | OAuth Client ID | logged at startup, or set `MAC_DEV_BRIDGE_OAUTH_CLIENT_ID` |
 | OAuth Client Secret | leave blank |
 | Token endpoint auth method | `none` |
@@ -412,13 +412,28 @@ makes the issuer stop matching what ChatGPT recorded, and a strict client drops 
 callback silently. A named tunnel also means creating the connector once instead of
 every run.
 
+For clients that ask for explicit OAuth endpoints, use the same public origin as
+the Server URL and set:
+
+| Field | Value |
+|---|---|
+| Authorization URL | `https://<hostname>/authorize` |
+| Token URL | `https://<hostname>/token` |
+| Registration URL | `https://<hostname>/register` |
+| Authorization server base URL | `https://<hostname>` |
+| Resource | `https://<hostname>/mcp` |
+
+The discovery documents expose these values automatically. `POST /register`
+accepts the public ChatGPT callback metadata, returns the stable `client_id`,
+and rejects untrusted redirect URIs.
+
 Endpoints served: `/.well-known/oauth-protected-resource`,
 `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration`
 plus `/.well-known/oauth-protected-resource/mcp`,
 `/.well-known/oauth-authorization-server/mcp`, `/.well-known/openid-configuration/mcp`
 and `/mcp/.well-known/openid-configuration` — seven paths in total, since the
 `/mcp/`-prefixed form exists only for `openid-configuration`. Then `/authorize`,
-`/token`, `/revoke`, `/revoke-all`, and `/healthz`. A 401
+`/register`, `/token`, `/revoke`, `/revoke-all`, and `/healthz`. A 401
 from `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="…"`, which is what
 lets a client discover the rest.
 

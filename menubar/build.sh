@@ -18,17 +18,20 @@ command -v swiftc >/dev/null || { echo "swiftc not found. Install the Xcode Comm
 
 echo "Building $NAME..."
 
-# Quit a running instance FIRST. Deleting a live bundle leaves the old process
+# Quit every known copy FIRST. Deleting a live bundle leaves the old process
 # running, and LaunchServices then reactivates that stale instance when you `open`
-# the rebuilt app — so you test old code believing it is new, while the old process
-# still supervises children from a bundle that no longer exists on disk.
-if pgrep -f "$APP/Contents/MacOS/$NAME" >/dev/null 2>&1; then
-  echo "  quitting the running instance first"
-  osascript -e 'quit app id "local.mac-developer-bridge.menubar"' >/dev/null 2>&1 || true
-  sleep 1
-  pkill -f "$APP/Contents/MacOS/$NAME" 2>/dev/null || true
-  sleep 1
-fi
+# the rebuilt app — so you test old code believing it is new. The installed copy
+# is the one users normally launch, so checking only $APP leaves that stale
+# instance behind.
+for candidate in "$APP" "/Applications/$NAME.app" "$HOME/Applications/$NAME.app"; do
+  if pgrep -f "$candidate/Contents/MacOS/$NAME" >/dev/null 2>&1; then
+    echo "  quitting the running instance: $candidate"
+    osascript -e 'quit app id "local.mac-developer-bridge.menubar"' >/dev/null 2>&1 || true
+    sleep 1
+    pkill -x "$NAME" 2>/dev/null || true
+    sleep 1
+  fi
+done
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

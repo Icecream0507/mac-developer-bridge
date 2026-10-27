@@ -719,7 +719,11 @@ final class Controller: NSObject, NSApplicationDelegate {
             // port comes from there rather than being passed here.
             tunnel.arguments = ["tunnel", "--no-autoupdate", "run", named.name]
         } else {
-            tunnel.arguments = ["tunnel", "--url", "http://127.0.0.1:\(httpPort)", "--no-autoupdate"]
+            // QUIC is cloudflared's default, but some networks allow the initial
+            // handshake and then drop idle UDP traffic. That leaves the menu item
+            // stuck in Starting… while the hostname returns 530. HTTP/2 uses the
+            // already-working TCP path and makes the quick-tunnel lifecycle stable.
+            tunnel.arguments = ["tunnel", "--url", "http://127.0.0.1:\(httpPort)", "--no-autoupdate", "--protocol", "http2"]
         }
         tunnel.environment = childEnvironment(publicURL: nil)
         let pipe = Pipe()

@@ -399,9 +399,10 @@ async function ensureLocalBridgeInitialized() {
 // OAuth 2.1 authorization server
 //
 // ChatGPT cannot be pointed at a static bearer token (its connector dialog has
-// no API-key field), and it can neither register dynamically nor use CIMD
-// against this server, so the operator pastes a client_id into its
-// "User-Defined OAuth Client" field and this file plays the AS itself.
+// no API-key field). This file plays the AS itself and supports the standard
+// dynamic-registration handshake used by Apps SDK clients. Registration is
+// intentionally narrow: this single-user bridge issues one stable public
+// client id and only accepts the documented ChatGPT callback shapes.
 //
 // Everything in this section is best-effort: no code path here may throw out of
 // a request handler, and none may prevent startup. A state-directory problem has
@@ -682,6 +683,7 @@ function asDoc(origin) {
     issuer: origin,
     authorization_endpoint: `${origin}/authorize`,
     token_endpoint: `${origin}/token`,
+    registration_endpoint: `${origin}/register`,
     revocation_endpoint: `${origin}/revoke`,
     revocation_endpoint_auth_methods_supported: ["none"],
     response_types_supported: ["code"],
@@ -699,11 +701,6 @@ function asDoc(origin) {
     scopes_supported: [OAUTH_SCOPE],
     authorization_response_iss_parameter_supported: true,
   };
-  // Deliberately absent: registration_endpoint and
-  // client_id_metadata_document_supported (advertising either routes the client
-  // into a registration flow this file does not implement), and every OIDC
-  // signing/subject field, which is what makes the openid-configuration alias
-  // safe -- an OIDC-strict client aborts before it can demand an ID token.
 }
 
 // The seven paths clients actually probe. Each protected-resource document
@@ -1020,6 +1017,73 @@ function issueTokens(res, clientId, aud) {
       token_type: "Bearer",
       expires_in: Math.floor(ACCESS_TTL_MS / 1000),
       refresh_token,
+      scope: OAUTH_SCOPE,
+    },
+    { "cache-control": "no-store" },
+  );
+}
+
+// RFC 7591 registration for the public ChatGPT/App SDK client. The bridge is
+// a single-user server, so registration returns its already-persisted stable
+// client id instead of creating an unbounded client database. The callback
+// policy remains the same as /authorize: only the built-in ChatGPT callback,
+// its per-connector form, or an explicitly configured exact URI is accepted.
+async function registerPost(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req);
+  } catch (e) {
+    return send(res, e?.httpStatus || 400, { error: "invalid_client_metadata" });
+  }
+
+  let metadata;
+  try {
+    metadata = JSON.parse(raw);
+  } catch {
+    return send(res, 400, { error: "invalid_client_metadata" });
+  }
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return send(res, 400, { error: "invalid_client_metadata" });
+  }
+
+  const redirectUris = metadata.redirect_uris;
+  if (
+    !Array.isArray(redirectUris) ||
+    redirectUris.length === 0 ||
+    redirectUris.length > 8 ||
+    redirectUris.some((uri) => typeof uri !== "string" || !allowedRedirect(uri))
+  ) {
+    return send(res, 400, { error: "invalid_redirect_uri" });
+  }
+
+  const grantTypes = metadata.grant_types;
+  if (grantTypes !== undefined && (!Array.isArray(grantTypes) || grantTypes.some((v) => v !== "authorization_code" && v !== "refresh_token"))) {
+    return send(res, 400, { error: "invalid_client_metadata" });
+  }
+  const responseTypes = metadata.response_types;
+  if (responseTypes !== undefined && (!Array.isArray(responseTypes) || responseTypes.some((v) => v !== "code"))) {
+    return send(res, 400, { error: "invalid_client_metadata" });
+  }
+  if (metadata.token_endpoint_auth_method !== undefined && metadata.token_endpoint_auth_method !== "none") {
+    return send(res, 400, { error: "invalid_client_metadata" });
+  }
+  if (metadata.scope !== undefined && metadata.scope !== OAUTH_SCOPE) {
+    return send(res, 400, { error: "invalid_scope" });
+  }
+
+  const clientId = store.client.id;
+  if (!clientId) return send(res, 503, { error: "temporarily_unavailable" });
+  log(`oauth dynamic registration accepted for ${clientId}`);
+  return send(
+    res,
+    201,
+    {
+      client_id: clientId,
+      client_id_issued_at: Math.floor((store.client.createdAt || Date.now()) / 1000),
+      redirect_uris: redirectUris,
+      grant_types: grantTypes || ["authorization_code", "refresh_token"],
+      response_types: responseTypes || ["code"],
+      token_endpoint_auth_method: "none",
       scope: OAUTH_SCOPE,
     },
     { "cache-control": "no-store" },
@@ -1709,6 +1773,11 @@ async function handle(req, res) {
     if (req.method === "GET") return authorizeGet(req, res, url);
     if (req.method === "POST") return authorizePost(req, res);
     return send(res, 405, { error: "method not allowed" });
+  }
+
+  if (pathname === "/register") {
+    if (req.method !== "POST") return send(res, 405, { error: "method not allowed" });
+    return registerPost(req, res);
   }
 
   if (pathname === "/token") {
