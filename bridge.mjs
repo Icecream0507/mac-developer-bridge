@@ -526,8 +526,21 @@ function boundedCollector(maxBytes) {
   };
 }
 
+// spawn() reports a missing cwd as "spawn /bin/zsh ENOENT", which reads as a broken
+// shell. Check first so the error names what is actually wrong.
+async function assertUsableCwd(cwd) {
+  let stat;
+  try {
+    stat = await fsp.stat(cwd);
+  } catch (error) {
+    throw new Error(`Working directory '${cwd}' is unusable: ${error?.code || error}`);
+  }
+  if (!stat.isDirectory()) throw new Error(`Working directory '${cwd}' is not a directory`);
+}
+
 async function runCommand({ command, cwd, env = {}, stdin = undefined, timeoutMs = SHELL_EXEC_DEFAULT_TIMEOUT_MS, maxOutputBytes = DEFAULT_OUTPUT_BYTES }) {
   const effectiveCwd = resolvePath(cwd || HOME);
+  await assertUsableCwd(effectiveCwd);
   const stdout = boundedCollector(Math.min(maxOutputBytes, MAX_OUTPUT_BYTES));
   const stderrOutput = boundedCollector(Math.min(maxOutputBytes, MAX_OUTPUT_BYTES));
   const startedAt = Date.now();
@@ -608,7 +621,26 @@ async function runCommand({ command, cwd, env = {}, stdin = undefined, timeoutMs
 async function readJobMetadata(jobId) {
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(jobId)) throw new Error("Invalid job_id");
   const metadataPath = path.join(JOB_DIR, `${jobId}.json`);
-  return JSON.parse(await fsp.readFile(metadataPath, "utf8"));
+  let raw;
+  try {
+    raw = await fsp.readFile(metadataPath, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    throw new Error(await jobNotFoundMessage(jobId));
+  }
+  return JSON.parse(raw);
+}
+
+// Job ids embed the label, so they are long and clients mistype or truncate them. The
+// leading timestamp usually survives, which is enough to point at the real id.
+async function jobNotFoundMessage(jobId) {
+  const timestamp = jobId.split("-")[0];
+  const ids = (await fsp.readdir(JOB_DIR).catch(() => []))
+    .filter((entry) => entry.endsWith(".json"))
+    .map((entry) => entry.slice(0, -".json".length));
+  const similar = ids.filter((id) => id.startsWith(`${timestamp}-`)).slice(0, 5);
+  const hint = similar.length > 0 ? ` Did you mean: ${similar.join(", ")}?` : " Use shell_job_list to find the id.";
+  return `No job with id '${jobId}'.${hint}`;
 }
 
 async function writeJobMetadata(metadata) {
@@ -1549,6 +1581,58 @@ const BACKGROUND_CHROME_DEFAULT_POOL_SIZE = 8;
 const BACKGROUND_CHROME_MAX_POOL_SIZE = 32;
 const CHATGPT_CHROME_EXTENSION_ID = "hehggadaopoacecdllhhajmbjkdcmajg";
 const CHATGPT_NATIVE_HOST_NAME = "com.openai.codexextension";
+
+async function chatgptChromeExtensionInstallationStatus() {
+  const chromeRoot = path.join(HOME, "Library", "Application Support", "Google", "Chrome");
+  const installations = [];
+  const errors = [];
+  let profiles;
+  try { profiles = await fsp.readdir(chromeRoot, {withFileTypes:true}); }
+  catch (error) {
+    return {extensionId: CHATGPT_CHROME_EXTENSION_ID, installed: error.code === "ENOENT" ? false : null,
+      enabled: null, installations, ...(error.code === "ENOENT" ? {} : {error: {code:error.code || "READ_FAILED"}})};
+  }
+  for (const profile of profiles.filter(x=>x.isDirectory() && /^(?:Default|Profile \d+)$/.test(x.name)).slice(0,32)) {
+    const root = path.join(chromeRoot, profile.name, "Extensions", CHATGPT_CHROME_EXTENSION_ID);
+    let versions;
+    try { versions = await fsp.readdir(root, {withFileTypes:true}); }
+    catch (error) { if(error.code !== "ENOENT")errors.push({profile:profile.name,code:error.code || "READ_FAILED"});continue; }
+    for (const version of versions.filter(x=>x.isDirectory()).slice(0,12)) {
+      const manifestPath=path.join(root,version.name,"manifest.json");
+      try {
+        const info=await fsp.stat(manifestPath);
+        if(!info.isFile() || info.size>262144)throw new Error("Invalid manifest size");
+        const manifest=JSON.parse(await fsp.readFile(manifestPath,"utf8"));
+        if(typeof manifest.version!=="string")throw new Error("Missing manifest version");
+        installations.push({profile:profile.name,version:manifest.version,manifestPath});
+      } catch(error) {errors.push({profile:profile.name,version:version.name,code:error.code || "INVALID_MANIFEST"});}
+    }
+  }
+  return {extensionId:CHATGPT_CHROME_EXTENSION_ID, installed:installations.length>0?true:errors.length?null:false,
+    enabled:null, installations, ...(errors.length?{errors:errors.slice(0,12)}:{})};
+}
+
+async function chatgptNativeHostInstallationStatus() {
+  const candidates = [
+    path.join(HOME,"Library","Application Support","Google","Chrome","NativeMessagingHosts",CHATGPT_NATIVE_HOST_NAME+".json"),
+    path.join("/Library","Google","Chrome","NativeMessagingHosts",CHATGPT_NATIVE_HOST_NAME+".json"),
+  ];
+  const registrations=[];const errors=[];
+  for(const manifestPath of candidates) {
+    try {
+      const info=await fsp.stat(manifestPath);
+      if(!info.isFile() || info.size>262144)throw new Error("Invalid manifest size");
+      const manifest=JSON.parse(await fsp.readFile(manifestPath,"utf8"));
+      if(manifest.name!==CHATGPT_NATIVE_HOST_NAME || manifest.type!=="stdio" || typeof manifest.path!=="string" || !path.isAbsolute(manifest.path))throw new Error("Invalid native host manifest");
+      let executablePresent=false;
+      try {await fsp.access(manifest.path,fs.constants.X_OK);executablePresent=true;}catch{}
+      const extensionAllowed=Array.isArray(manifest.allowed_origins) && manifest.allowed_origins.includes("chrome-extension://"+CHATGPT_CHROME_EXTENSION_ID+"/");
+      registrations.push({manifestPath,name:manifest.name,path:manifest.path,type:manifest.type,extensionAllowed,executablePresent});
+    } catch(error) {if(error.code!=="ENOENT")errors.push({manifestPath,code:error.code || "INVALID_MANIFEST"});}
+  }
+  return {name:CHATGPT_NATIVE_HOST_NAME,registered:registrations.length>0?true:errors.length?null:false,
+    registrations,...(errors.length?{errors}:{})};
+}
 
 function backgroundChromeApprovalError(reason) {
   const error = new Error(`Background Chrome is not approved for this website: ${reason}. Run scripts/approve-personal-browser.sh --provider chrome-background with the required URL patterns. Approvals are shared across all ChatGPT sessions on this bridge until their individual expiry times.`);
@@ -3290,6 +3374,7 @@ async function dispatchTool(name, args) {
         }
       }
       const cwd = resolvePath(optionalString(args, "cwd", HOME));
+      await assertUsableCwd(cwd);
       const env = normalizeEnv(args?.env);
       const label = optionalString(args, "label", "background-job").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "background-job";
       const id = `${Date.now()}-${crypto.randomBytes(5).toString("hex")}-${label}`;

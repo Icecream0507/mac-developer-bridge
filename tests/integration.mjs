@@ -247,6 +247,26 @@ try {
     return current.running ? null : current;
   });
 
+  const rawCall = (name, args) => client.request("tools/call", { _meta: modernMeta, name, arguments: args }, 20_000);
+  const missingCwd = path.join(temporaryRoot, "missing-cwd");
+  const jobCountBefore = (await fsp.readdir(path.join(dataDir, "jobs"))).length;
+  for (const tool of ["shell_exec", "shell_start"]) {
+    const text = JSON.stringify(await rawCall(tool, { command: "true", cwd: missingCwd }));
+    assert.match(text, /Working directory .*missing-cwd.* is unusable: ENOENT/, text);
+    assert.doesNotMatch(text, /spawn .* ENOENT/, text);
+  }
+  assert.equal((await fsp.readdir(path.join(dataDir, "jobs"))).length, jobCountBefore, "a rejected cwd must not leave job logs");
+
+  const truncatedId = job.id.split("-").slice(0, 2).join("-");
+  const notFound = JSON.stringify(await rawCall("shell_job_status", { job_id: truncatedId }));
+  assert.ok(notFound.includes("Did you mean") && notFound.includes(job.id), notFound);
+  const unknown = JSON.stringify(await rawCall("shell_job_status", { job_id: "1-unknown" }));
+  assert.ok(unknown.includes("shell_job_list"), unknown);
+
+  const extensionStatus = await modernTool(client, "chatgpt_extension_status");
+  assert.equal(typeof extensionStatus.installation.extensionId, "string");
+  assert.equal(typeof extensionStatus.nativeHost.name, "string");
+
   const thread = await modernTool(client, "codex_thread_read", {
     thread_id: "019fa926-dbbd-7d72-aa0c-8edd41bd585c",
     include_turns: true,
